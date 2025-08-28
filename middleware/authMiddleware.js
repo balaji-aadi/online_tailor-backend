@@ -1,47 +1,43 @@
-const jwt = require('jsonwebtoken');
-const User = require('../models/User');
+// authMiddleware.js
+import { asyncHandler } from "../utils/asyncHandler.js";
+import { ApiError } from "../utils/ApiError.js";
+import User from "../models/User.js";
+import jwt from "jsonwebtoken";
 
-exports.protect = async (req, res, next) => {
-  let token;
-  if (
-    req.headers.authorization &&
-    req.headers.authorization.startsWith('Bearer')
-  ) {
-    token = req.headers.authorization.split(' ')[1];
-  } else if (req.cookies && req.cookies.token) {
-    token = req.cookies.token;
-  }
+// Verify JWT already exists
+export const verifyJWT = asyncHandler(async(req, res, next) => {
+    try {
+        const token = req.cookies?.accessToken || req.header("Authorization")?.replace("Bearer ", "")
+        
+        // console.log("token", token);
+        if (!token) {
+            return res.status(401).json(new ApiError(401, "Unauthorized request"));
+        }
+    
+        const decodedToken = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET)
+    
+        const user = await User.findById(decodedToken?._id).select("-password -refreshToken -otp -otp_time -uid")
+        .populate("user_role")
+        .populate("country")
+        .populate("city");
+    
+        if (!user) {
+            return res.status(401).json(new ApiError(401, "Invalid Access Token"));
+        }
+    
+        req.user = user;
+        next()
+    } catch (error) {
+        return res.status(403).json(new ApiError(403, `Token error ${error?.message}` || "Invalid access token"));
+    }
+    
+})
 
-  if (!token) {
-    return res.status(401).json({ message: 'Not authorized, token missing' });
-  }
+// Admin authorization middleware
+// export const authorizeAdmin = (req, res, next) => {
+//   if (!req.user || req.user.user_role?.name !== "admin") {
+//     return res.status(403).json(new ApiError(403, "Forbidden: Admins only"));
+//   }
+//   next();
+// };
 
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await User.findById(decoded.id).select('-password');
-    if (!user) return res.status(401).json({ message: 'Not authorized, user not found' });
-    req.user = user;
-    next();
-  } catch (error) {
-    return res.status(401).json({ message: 'Not authorized, token failed' });
-  }
-};
-
-const checkRole = (roles) => (req, res, next) => {
-  if (!req.user) return res.status(401).json({ message: 'Not authorized' });
-  const hasRole = req.user.roles.some((r) => roles.includes(r));
-  if (!hasRole) return res.status(403).json({ message: 'Forbidden: insufficient privileges' });
-  next();
-};
-
-exports.authorizeAdmin = checkRole(['admin']);
-exports.authorizeTailor = checkRole(['tailor']);
-exports.authorizeCustomer = checkRole(['customer']);
-
-// Token refresh handler (example, not full implementation)
-exports.refreshTokenHandler = (req, res) => {
-  const refreshToken = req.cookies.refreshToken;
-  if (!refreshToken) return res.status(401).json({ message: 'No refresh token' });
-
-  // verify and issue new access token logic here
-};

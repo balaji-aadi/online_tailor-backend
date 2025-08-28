@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+import mongoose from 'mongoose';
 
 const ratingMetricsSchema = new mongoose.Schema({
   quality: { type: Number, min: 1, max: 5 },
@@ -32,4 +32,4 @@ const reviewSchema = new mongoose.Schema(
 );
 
 const Review = mongoose.model('Review', reviewSchema);
-module.exports = Review;
+export default Review;

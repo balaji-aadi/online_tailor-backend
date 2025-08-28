@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+import mongoose from 'mongoose';
 
 const fileMetadataSchema = new mongoose.Schema({
   url: { type: String, required: true },
@@ -75,5 +75,4 @@ const tailorProfileSchema = new mongoose.Schema(
 tailorProfileSchema.index({ gpsAddress: '2dsphere' });
 
 const TailorProfile = mongoose.model('TailorProfile', tailorProfileSchema);
-
-module.exports = TailorProfile;
+export default TailorProfile;

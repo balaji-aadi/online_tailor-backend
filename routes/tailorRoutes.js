@@ -1,48 +1,45 @@
-const express = require('express');
+import express from "express";
+import * as tailorController from "../controllers/tailorController.js";
+import multer from "../middleware/multer.middleware.js";
+import {
+  validateProfileUpdate,
+  validateOrderUpdate,
+  validateAppointmentScheduling,
+  validateFinancialData,
+} from "../validators/tailorValidators.js";
+import { verifyJWT } from "../middleware/authMiddleware.js";
+
 const router = express.Router();
-const tailorController = require('../controllers/tailorController');
-const upload = require('../middleware/uploadMiddleware');
-const { protect, authorizeTailor } = require('../middleware/authMiddleware');
-const { validateProfileUpdate, validateOrderUpdate, validateAppointmentScheduling, validateFinancialData } = require('../validators/tailorValidators');
 
-// All routes protected and only accessible by tailors
-router.use(protect);
-router.use(authorizeTailor);
+router.use(verifyJWT);
 
-// Business profile management
-router.get('/profile', tailorController.getProfile);
-router.put('/profile', validateProfileUpdate, tailorController.updateProfile);
-router.post('/portfolio/upload', upload.array('portfolioImages', 20), tailorController.uploadPortfolio);
-router.get('/portfolio', tailorController.listPortfolio);
-router.delete('/portfolio/:fileId', tailorController.deletePortfolioFile);
-router.post('/specializations', tailorController.addSpecialization);
-router.delete('/specializations/:specializationId', tailorController.removeSpecialization);
-router.post('/certifications', upload.array('certificationDocs', 10), tailorController.uploadCertifications);
-router.get('/certifications', tailorController.listCertifications);
-router.delete('/certifications/:certificationId', tailorController.deleteCertification);
+/** ---------------- BUSINESS PROFILE MANAGEMENT ---------------- */
+router.get("/profile", tailorController.getProfile);
+router.put("/profile", validateProfileUpdate, tailorController.updateProfile);
 
-// Order management
-router.get('/orders', tailorController.listOrders);
-router.get('/orders/:orderId', tailorController.getOrderDetails);
-router.put('/orders/:orderId/status', validateOrderUpdate, tailorController.updateOrderStatus);
-router.post('/orders/batch/process', tailorController.batchProcessOrders);
-router.post('/orders/:orderId/qcphotos', upload.array('qcPhotos', 30), tailorController.uploadQCPhotos);
-router.post('/orders/:orderId/rush', tailorController.markRushOrder);
-router.put('/orders/:orderId/partial-delivery', tailorController.updatePartialDelivery);
-router.get('/orders/:orderId/tracking', tailorController.getOrderTracking);
+router.post("/portfolio/upload",multer.uploadSingle("progressPhoto"),tailorController.uploadPortfolio);
+router.get("/portfolio", tailorController.listPortfolio);
+router.delete("/portfolio/:fileId", tailorController.deletePortfolioFile);
 
-// Customer interaction tools
-router.get('/chat/conversations', tailorController.listChats);
-router.post('/chat/send', tailorController.sendMessage);
-router.post('/appointments/schedule', validateAppointmentScheduling, tailorController.scheduleAppointment);
-router.get('/appointments', tailorController.listAppointments);
-router.post('/media/share/photo', upload.single('photo'), tailorController.sharePhotoNote);
-router.post('/media/share/voice', upload.single('voiceNote'), tailorController.shareVoiceNote);
+// Removed: add/remove specializations (handlers not implemented)
 
-// Financial management
-router.get('/financial/revenue', tailorController.getRevenueTracking);
-router.get('/financial/commissions', tailorController.getCommissionDetails);
-router.post('/financial/invoice', validateFinancialData, tailorController.generateInvoice);
-router.get('/financial/analytics', tailorController.getFinancialAnalytics);
+// Removed: certifications routes (handlers not implemented)
 
-module.exports = router;
+/** ---------------- ORDER MANAGEMENT ---------------- */
+router.get("/orders", tailorController.listOrders);
+router.get("/orders/:orderId", tailorController.getOrderDetails);
+router.put("/orders/:orderId/status", validateOrderUpdate, tailorController.updateOrderStatus);
+// Removed: batch process and QC photo upload (handlers not implemented)
+router.post("/orders/:orderId/rush", tailorController.markRushOrder);
+// Removed: partial delivery update (handler not implemented)
+router.get("/orders/:orderId/tracking", tailorController.getOrderTracking);
+
+/** ---------------- CUSTOMER INTERACTION TOOLS ---------------- */
+// router.get("/chat/conversations", tailorController.listChats);
+// router.post("/chat/send", tailorController.sendMessage);
+// Removed: appointments and media share routes (handlers not implemented)
+
+/** ---------------- FINANCIAL MANAGEMENT ---------------- */
+// Removed: financial routes (handlers not implemented)
+
+export default router;

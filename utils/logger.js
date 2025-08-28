@@ -1,20 +1,25 @@
-const { createLogger, format, transports } = require('winston');
-require('winston-daily-rotate-file');
-const path = require('path');
+// utils/logger.js
+import { createLogger, format, transports } from "winston";
+import "winston-daily-rotate-file";
+import path from "path";
+import { fileURLToPath } from "url";
 
-const logDir = path.join(__dirname, '..', 'logs');
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const logDir = path.join(__dirname, "..", "logs");
 
 const dailyRotateFileTransport = new transports.DailyRotateFile({
-  filename: 'app-%DATE%.log',
+  filename: "app-%DATE%.log",
   dirname: logDir,
-  datePattern: 'YYYY-MM-DD',
+  datePattern: "YYYY-MM-DD",
   zippedArchive: true,
-  maxSize: '20m',
-  maxFiles: '14d',
+  maxSize: "20m",
+  maxFiles: "14d",
 });
 
 const logger = createLogger({
-  level: 'info',
+  level: "info",
   format: format.combine(format.timestamp(), format.json()),
   transports: [
     dailyRotateFileTransport,
@@ -26,9 +31,9 @@ const logger = createLogger({
 });
 
 logger.stream = {
-  write: function (message) {
+  write(message) {
     logger.info(message.trim());
   },
 };
 
-module.exports = logger;
+export default logger;

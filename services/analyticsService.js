@@ -1,13 +1,15 @@
-const User = require('../models/User');
-const Order = require('../models/Order');
-const TailorProfile = require('../models/TailorProfile');
+import Order from '../models/Order.js';
+import TailorProfile from '../models/TailorProfile.js';
+import  User from '../models/User.js';
 
-exports.getRealTimeMetrics = async () => {
-  // Example aggregation
+/**
+ * Returns key real-time metrics for admin dashboard.
+ */
+export const getRealTimeMetrics = async () => {
   const totalUsers = await User.countDocuments();
   const activeTailors = await User.countDocuments({ roles: 'tailor', isApproved: true });
   const totalOrdersToday = await Order.countDocuments({
-    createdAt: { $gte: new Date(new Date().setHours(0,0,0,0)) }
+    createdAt: { $gte: new Date(new Date().setHours(0, 0, 0, 0)) },
   });
 
   return {
@@ -17,7 +19,10 @@ exports.getRealTimeMetrics = async () => {
   };
 };
 
-exports.getGeographicDistribution = async () => {
+/**
+ * Returns geographic distribution of tailors.
+ */
+export const getGeographicDistribution = async () => {
   const distribution = await TailorProfile.aggregate([
     {
       $geoNear: {
@@ -36,8 +41,10 @@ exports.getGeographicDistribution = async () => {
   return distribution;
 };
 
-exports.getBusinessIntelligence = async () => {
-  // Simplified revenue analytics
+/**
+ * Returns business intelligence / revenue analytics per tailor.
+ */
+export const getBusinessIntelligence = async () => {
   const revenueAgg = await Order.aggregate([
     { $match: { lifecycleStatus: { current: 'completed' } } },
     {

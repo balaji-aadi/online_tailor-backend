@@ -1,18 +1,20 @@
-const User = require('../models/User');
-const Content = require('../models/Content');
-const Dispute = require('../models/Dispute');
-const Notification = require('../models/Notification');
-const analyticsService = require('../services/analyticsService');
-const notificationService = require('../services/notificationService');
-const csv = require('csvtojson');
-const XLSX = require('xlsx');
-const logger = require('../utils/logger');
-const path = require('path');
-const fs = require('fs');
-const mongoose = require('mongoose');
+import Dispute from '../models/Dispute.js';
+import * as analyticsService from '../services/analyticsService.js';
+import * as notificationService from '../services/notificationService.js';
+import csv from 'csvtojson';
+import XLSX from 'xlsx';
+import logger from '../utils/logger.js';
+import path from 'path';
+import fs from 'fs';
+import mongoose from 'mongoose';
+import  User  from '../models/User.js';
+import Notification from '../models/Notification.js';
+
+
+
 
 // User verification and approval workflows
-exports.verifyUser = async (req, res, next) => {
+const verifyUser = async (req, res, next) => {
   try {
     const { userId, documents } = req.body;
     if (!mongoose.Types.ObjectId.isValid(userId)) {
@@ -23,7 +25,7 @@ exports.verifyUser = async (req, res, next) => {
 
     user.isVerified = true;
     user.verifiedAt = new Date();
-    user.documents = documents; // expecting processed validated docs
+    user.documents = documents;
     await user.save();
 
     res.status(200).json({ message: 'User verified successfully' });
@@ -32,7 +34,7 @@ exports.verifyUser = async (req, res, next) => {
   }
 };
 
-exports.approveUser = async (req, res, next) => {
+const approveUser = async (req, res, next) => {
   try {
     const { userId, approvalStatus } = req.body;
     if (!mongoose.Types.ObjectId.isValid(userId)) {
@@ -51,10 +53,10 @@ exports.approveUser = async (req, res, next) => {
   }
 };
 
-exports.updateUserRole = async (req, res, next) => {
+const updateUserRole = async (req, res, next) => {
   try {
     const { userId } = req.params;
-    const { roles } = req.body; // array of role strings
+    const { roles } = req.body;
     if (!mongoose.Types.ObjectId.isValid(userId)) {
       return res.status(400).json({ message: 'Invalid userId' });
     }
@@ -64,7 +66,6 @@ exports.updateUserRole = async (req, res, next) => {
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ message: 'User not found' });
 
-    // Record audit trail
     user.auditTrail.push({
       action: 'Role update',
       by: req.user._id,
@@ -82,14 +83,15 @@ exports.updateUserRole = async (req, res, next) => {
   }
 };
 
-exports.bulkImportUsers = async (req, res, next) => {
+const bulkImportUsers = async (req, res, next) => {
   try {
     if (!req.files || req.files.length === 0) {
       return res.status(400).json({ message: 'No files uploaded' });
     }
-    // Accept CSV or Excel file
+
     const file = req.files[0];
     let usersData = [];
+
     if (file.mimetype === 'text/csv' || file.originalname.endsWith('.csv')) {
       usersData = await csv().fromFile(file.path);
     } else if (
@@ -103,7 +105,6 @@ exports.bulkImportUsers = async (req, res, next) => {
       return res.status(400).json({ message: 'Unsupported file format' });
     }
 
-    // Process user data (simple example, normally validation needed)
     const userDocs = usersData.map((user) => ({
       email: user.email,
       password: user.password || null,
@@ -113,7 +114,6 @@ exports.bulkImportUsers = async (req, res, next) => {
     }));
 
     await User.insertMany(userDocs);
-
     fs.unlinkSync(file.path);
 
     res.status(201).json({ message: `${userDocs.length} users imported successfully` });
@@ -122,10 +122,9 @@ exports.bulkImportUsers = async (req, res, next) => {
   }
 };
 
-exports.bulkExportUsers = async (req, res, next) => {
+const bulkExportUsers = async (req, res, next) => {
   try {
     const users = await User.find().select('email roles isVerified isApproved createdAt').lean();
-    // Export as CSV
     const headers = 'email,roles,isVerified,isApproved,createdAt\n';
     const csvRows = users
       .map(
@@ -142,9 +141,9 @@ exports.bulkExportUsers = async (req, res, next) => {
   }
 };
 
-exports.broadcastNotifications = async (req, res, next) => {
+const broadcastNotifications = async (req, res, next) => {
   try {
-    const { message, type, targetUserIds } = req.body; // type: push, sms, email; targetUserIds optional (all users otherwise)
+    const { message, type, targetUserIds } = req.body;
 
     let users;
     if (targetUserIds && targetUserIds.length > 0) {
@@ -152,6 +151,7 @@ exports.broadcastNotifications = async (req, res, next) => {
     } else {
       users = await User.find().select('_id email').lean();
     }
+
     const notifications = users.map((u) => ({
       userId: u._id,
       type,
@@ -162,8 +162,6 @@ exports.broadcastNotifications = async (req, res, next) => {
     }));
 
     await Notification.insertMany(notifications);
-
-    // Send asynchronously
     notificationService.sendBulkNotifications(notifications).catch((err) => logger.error(err));
 
     res.status(200).json({ message: 'Broadcast notifications queued for delivery' });
@@ -172,7 +170,7 @@ exports.broadcastNotifications = async (req, res, next) => {
   }
 };
 
-exports.blacklistUser = async (req, res, next) => {
+const blacklistUser = async (req, res, next) => {
   try {
     const { userId, reason, expiryDate } = req.body;
     if (!mongoose.Types.ObjectId.isValid(userId)) {
@@ -187,13 +185,14 @@ exports.blacklistUser = async (req, res, next) => {
       expiryDate: expiryDate ? new Date(expiryDate) : null,
     };
     await user.save();
+
     res.status(200).json({ message: 'User blacklisted successfully' });
   } catch (error) {
     next(error);
   }
 };
 
-exports.whitelistUser = async (req, res, next) => {
+const whitelistUser = async (req, res, next) => {
   try {
     const { userId, reason, expiryDate } = req.body;
     if (!mongoose.Types.ObjectId.isValid(userId)) {
@@ -208,45 +207,47 @@ exports.whitelistUser = async (req, res, next) => {
       expiryDate: expiryDate ? new Date(expiryDate) : null,
     };
     await user.save();
+
     res.status(200).json({ message: 'User whitelisted successfully' });
   } catch (error) {
     next(error);
   }
 };
 
-exports.getWhiteLabelConfig = async (req, res, next) => {
-  try {
-    // Assuming config stored in DB collection named 'Content' with type 'whitelabel'
-    const config = await Content.findOne({ type: 'whitelabel' }).lean();
-    res.json(config || {});
-  } catch (error) {
-    next(error);
-  }
-};
+// const getWhiteLabelConfig = async (req, res, next) => {
+//   try {
+//     const config = await Content.findOne({ type: 'whitelabel' }).lean();
+//     res.json(config || {});
+//   } catch (error) {
+//     next(error);
+//   }
+// };
 
-exports.updateWhiteLabelConfig = async (req, res, next) => {
-  try {
-    const { config } = req.body;
-    let existingConfig = await Content.findOne({ type: 'whitelabel' });
-    if (!existingConfig) {
-      existingConfig = new Content({
-        type: 'whitelabel',
-        body: config,
-        language: 'en',
-        updatedAt: new Date(),
-      });
-    } else {
-      existingConfig.body = config;
-      existingConfig.updatedAt = new Date();
-    }
-    await existingConfig.save();
-    res.status(200).json({ message: 'White-label config updated successfully' });
-  } catch (error) {
-    next(error);
-  }
-};
+// const updateWhiteLabelConfig = async (req, res, next) => {
+//   try {
+//     const { config } = req.body;
+//     let existingConfig = await Content.findOne({ type: 'whitelabel' });
 
-exports.getRealTimeMetrics = async (req, res, next) => {
+//     if (!existingConfig) {
+//       existingConfig = new Content({
+//         type: 'whitelabel',
+//         body: config,
+//         language: 'en',
+//         updatedAt: new Date(),
+//       });
+//     } else {
+//       existingConfig.body = config;
+//       existingConfig.updatedAt = new Date();
+//     }
+
+//     await existingConfig.save();
+//     res.status(200).json({ message: 'White-label config updated successfully' });
+//   } catch (error) {
+//     next(error);
+//   }
+// };
+
+const getRealTimeMetrics = async (req, res, next) => {
   try {
     const metrics = await analyticsService.getRealTimeMetrics();
     res.json(metrics);
@@ -255,7 +256,7 @@ exports.getRealTimeMetrics = async (req, res, next) => {
   }
 };
 
-exports.getGeographicDistribution = async (req, res, next) => {
+const getGeographicDistribution = async (req, res, next) => {
   try {
     const geoDist = await analyticsService.getGeographicDistribution();
     res.json(geoDist);
@@ -264,7 +265,7 @@ exports.getGeographicDistribution = async (req, res, next) => {
   }
 };
 
-exports.getBusinessIntelligence = async (req, res, next) => {
+const getBusinessIntelligence = async (req, res, next) => {
   try {
     const biData = await analyticsService.getBusinessIntelligence();
     res.json(biData);
@@ -273,10 +274,9 @@ exports.getBusinessIntelligence = async (req, res, next) => {
   }
 };
 
-exports.initiateDispute = async (req, res, next) => {
+const initiateDispute = async (req, res, next) => {
   try {
     const { orderId, evidence, description } = req.body;
-    // Create dispute case linked to order
     const dispute = await Dispute.create({
       orderId,
       status: 'open',
@@ -293,18 +293,18 @@ exports.initiateDispute = async (req, res, next) => {
   }
 };
 
-exports.mediateDispute = async (req, res, next) => {
+const mediateDispute = async (req, res, next) => {
   try {
     const { disputeId } = req.params;
     const { resolution, communication } = req.body;
     const dispute = await Dispute.findById(disputeId);
-    if (!dispute) {
-      return res.status(404).json({ message: 'Dispute not found' });
-    }
+    if (!dispute) return res.status(404).json({ message: 'Dispute not found' });
+
     dispute.status = resolution.status || dispute.status;
     dispute.resolutionDetails = resolution.details || dispute.resolutionDetails;
     if (communication) dispute.communicationChannel.push(communication);
     dispute.updatedAt = new Date();
+
     await dispute.save();
     res.json({ message: 'Dispute updated', dispute });
   } catch (error) {
@@ -312,77 +312,100 @@ exports.mediateDispute = async (req, res, next) => {
   }
 };
 
-exports.getDisputeDetails = async (req, res, next) => {
+const getDisputeDetails = async (req, res, next) => {
   try {
     const { disputeId } = req.params;
     const dispute = await Dispute.findById(disputeId).lean();
-    if (!dispute) {
-      return res.status(404).json({ message: 'Dispute not found' });
-    }
+    if (!dispute) return res.status(404).json({ message: 'Dispute not found' });
+
     res.json(dispute);
   } catch (error) {
     next(error);
   }
 };
 
-exports.listContent = async (req, res, next) => {
-  try {
-    const { language, type } = req.query;
-    const filter = {};
-    if (language) filter.language = language;
-    if (type) filter.type = type;
-    const contents = await Content.find(filter).lean();
-    res.json(contents);
-  } catch (error) {
-    next(error);
-  }
+// const listContent = async (req, res, next) => {
+//   try {
+//     const { language, type } = req.query;
+//     const filter = {};
+//     if (language) filter.language = language;
+//     if (type) filter.type = type;
+
+//     const contents = await Content.find(filter).lean();
+//     res.json(contents);
+//   } catch (error) {
+//     next(error);
+//   }
+// };
+
+// const createContent = async (req, res, next) => {
+//   try {
+//     const { language, type, body, seo, complianceFlags } = req.body;
+//     const content = new Content({
+//       language,
+//       type,
+//       body,
+//       seo,
+//       complianceFlags,
+//       updatedAt: new Date(),
+//     });
+
+//     await content.save();
+//     res.status(201).json({ message: 'Content created', content });
+//   } catch (error) {
+//     next(error);
+//   }
+// };
+
+// const updateContent = async (req, res, next) => {
+//   try {
+//     const { contentId } = req.params;
+//     const { language, type, body, seo, complianceFlags } = req.body;
+//     const content = await Content.findById(contentId);
+//     if (!content) return res.status(404).json({ message: 'Content not found' });
+
+//     content.language = language || content.language;
+//     content.type = type || content.type;
+//     content.body = body || content.body;
+//     content.seo = seo || content.seo;
+//     content.complianceFlags = complianceFlags || content.complianceFlags;
+//     content.updatedAt = new Date();
+
+//     await content.save();
+//     res.json({ message: 'Content updated', content });
+//   } catch (error) {
+//     next(error);
+//   }
+// };
+
+// const deleteContent = async (req, res, next) => {
+//   try {
+//     const { contentId } = req.params;
+//     await Content.findByIdAndDelete(contentId);
+//     res.json({ message: 'Content deleted' });
+//   } catch (error) {
+//     next(error);
+//   }
+// };
+
+// Export at bottom
+// New (ESM)
+export {
+  verifyUser,
+  approveUser,
+  updateUserRole,
+  bulkImportUsers,
+  bulkExportUsers,
+  broadcastNotifications,
+  blacklistUser,
+  whitelistUser,
+  // getWhiteLabelConfig,
+  // updateWhiteLabelConfig,
+  getRealTimeMetrics,
+  getGeographicDistribution,
+  getBusinessIntelligence,
+  initiateDispute,
+  mediateDispute,
+  getDisputeDetails
 };
 
-exports.createContent = async (req, res, next) => {
-  try {
-    const { language, type, body, seo, complianceFlags } = req.body;
-    const content = new Content({
-      language,
-      type,
-      body,
-      seo,
-      complianceFlags,
-      updatedAt: new Date(),
-    });
-    await content.save();
-    res.status(201).json({ message: 'Content created', content });
-  } catch (error) {
-    next(error);
-  }
-};
-
-exports.updateContent = async (req, res, next) => {
-  try {
-    const { contentId } = req.params;
-    const { language, type, body, seo, complianceFlags } = req.body;
-    const content = await Content.findById(contentId);
-    if (!content) return res.status(404).json({ message: 'Content not found' });
-
-    content.language = language || content.language;
-    content.type = type || content.type;
-    content.body = body || content.body;
-    content.seo = seo || content.seo;
-    content.complianceFlags = complianceFlags || content.complianceFlags;
-    content.updatedAt = new Date();
-    await content.save();
-
-    res.json({ message: 'Content updated', content });
-  } catch (error) {
-    next(error);
-  }
-};
-
-exports.deleteContent = async (req, res, next) => {
-  try {
-    const { contentId } = req.params;
-    await Content.findByIdAndDelete(contentId);
-    res.json({ message: 'Content deleted' });
-  } catch (error) {
-    next(error);
-  }
-};

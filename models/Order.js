@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+import mongoose from 'mongoose';
 
 const qcCheckpointSchema = new mongoose.Schema({
   photoUrl: { type: String },
@@ -83,5 +83,4 @@ const orderSchema = new mongoose.Schema(
 );
 
 const Order = mongoose.model('Order', orderSchema);
-
-module.exports = Order;
+export default Order;

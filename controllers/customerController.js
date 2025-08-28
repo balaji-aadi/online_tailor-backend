@@ -1,25 +1,47 @@
-const TailorProfile = require('../models/TailorProfile');
-const Order = require('../models/Order');
-const Measurement = require('../models/Measurement');
-const Review = require('../models/Review');
-const FamilyProfile = require('../models/FamilyProfile');
-const logger = require('../utils/logger');
-const crypto = require('crypto');
-const mongoose = require('mongoose');
+import TailorProfile from '../models/TailorProfile.js';
+import Order from '../models/Order.js';
+import Measurement from '../models/Measurement.js';
+import Review from '../models/Review.js';
+import logger from '../utils/logger.js';
+import crypto from 'crypto';
+import mongoose from 'mongoose';
 
-// AI-based tailor discovery algorithms (simplified)
-exports.searchTailors = async (req, res, next) => {
+
+// =========================
+// Utility: Measurement Encryption
+// =========================
+const algorithm = 'aes-256-cbc';
+const key = crypto.createHash('sha256')
+  .update(String(process.env.MEASUREMENT_ENCRYPT_KEY || 'defaultkey'))
+  .digest('base64')
+  .substr(0, 32);
+
+const encryptField = (data) => {
+  const ivBuf = crypto.randomBytes(16);
+  const cipher = crypto.createCipheriv(algorithm, key, ivBuf);
+  let encrypted = cipher.update(JSON.stringify(data), 'utf8', 'hex');
+  encrypted += cipher.final('hex');
+  return { iv: ivBuf.toString('hex'), content: encrypted };
+};
+
+const decryptField = (encrypted) => {
+  const ivBuf = Buffer.from(encrypted.iv, 'hex');
+  const decipher = crypto.createDecipheriv(algorithm, key, ivBuf);
+  let decrypted = decipher.update(encrypted.content, 'hex', 'utf8');
+  decrypted += decipher.final('utf8');
+  return JSON.parse(decrypted);
+};
+
+// =========================
+// Tailor Discovery & Recommendations
+// =========================
+const searchTailors = async (req, res, next) => {
   try {
-    const { location, preferences, filters } = req.body;
-
-    // Simple geo spatial query example for nearby tailors
+    const { location, preferences } = req.body;
     const tailors = await TailorProfile.find({
       'gpsAddress.coordinates': {
         $nearSphere: {
-          $geometry: {
-            type: 'Point',
-            coordinates: [location.longitude, location.latitude],
-          },
+          $geometry: { type: 'Point', coordinates: [location.longitude, location.latitude] },
           $maxDistance: 50000,
         },
       },
@@ -32,9 +54,7 @@ exports.searchTailors = async (req, res, next) => {
   }
 };
 
-// Personalized recommendations (stub)
-exports.getRecommendations = async (req, res, next) => {
-  // For demo, return top rated tailors
+const getRecommendations = async (req, res, next) => {
   try {
     const topTailors = await TailorProfile.aggregate([
       {
@@ -45,11 +65,7 @@ exports.getRecommendations = async (req, res, next) => {
           as: 'reviews',
         },
       },
-      {
-        $addFields: {
-          avgReview: { $avg: '$reviews.qualityRating' },
-        },
-      },
+      { $addFields: { avgReview: { $avg: '$reviews.qualityRating' } } },
       { $sort: { avgReview: -1 } },
       { $limit: 10 },
     ]);
@@ -59,32 +75,23 @@ exports.getRecommendations = async (req, res, next) => {
   }
 };
 
-// Events calendar
-exports.getEventsCalendar = async (req, res, next) => {
+const getEventsCalendar = async (req, res, next) => {
   res.json({ message: 'Events calendar - to be implemented' });
 };
 
-// Order placement with dynamic pricing & multi-payment support
-exports.placeOrder = async (req, res, next) => {
+// =========================
+// Orders
+// =========================
+const placeOrder = async (req, res, next) => {
   try {
-    const {
-      tailorId,
-      orderDetails,
-      measurements,
-      paymentMethod,
-      customizations,
-      deliveryAddress,
-    } = req.body;
+    const { tailorId, orderDetails, measurements, paymentMethod, customizations, deliveryAddress } = req.body;
 
     const order = new Order({
       customerId: req.user._id,
       tailorId,
       intakeChannel: 'mobile_app',
       classification: orderDetails.classification,
-      lifecycleStatus: {
-        current: 'pending',
-        timestamps: { pending: new Date() },
-      },
+      lifecycleStatus: { current: 'pending', timestamps: { pending: new Date() } },
       orderDetails,
       measurements,
       customizations,
@@ -93,16 +100,13 @@ exports.placeOrder = async (req, res, next) => {
     });
 
     await order.save();
-
-    // Payment handling stub
     res.status(201).json({ message: 'Order placed successfully', orderId: order._id });
   } catch (error) {
     next(error);
   }
 };
 
-// Order tracking
-exports.getOrderTracking = async (req, res, next) => {
+const getOrderTracking = async (req, res, next) => {
   try {
     const { orderId } = req.params;
     if (!mongoose.Types.ObjectId.isValid(orderId)) {
@@ -110,14 +114,14 @@ exports.getOrderTracking = async (req, res, next) => {
     }
     const order = await Order.findOne({ _id: orderId, customerId: req.user._id }).lean();
     if (!order) return res.status(404).json({ message: 'Order not found' });
+
     res.json({ lifecycleStatus: order.lifecycleStatus, photos: order.progressPhotos || [] });
   } catch (error) {
     next(error);
   }
 };
 
-// Order history
-exports.getOrderHistory = async (req, res, next) => {
+const getOrderHistory = async (req, res, next) => {
   try {
     const orders = await Order.find({ customerId: req.user._id }).sort({ createdAt: -1 }).lean();
     res.json(orders);
@@ -126,26 +130,23 @@ exports.getOrderHistory = async (req, res, next) => {
   }
 };
 
-// Payment (stub)
-exports.makePayment = async (req, res, next) => {
-  // Payment gateway integration to be implemented
+const makePayment = async (req, res, next) => {
   res.json({ message: 'Payment processing - to be implemented' });
 };
 
-// Order status
-exports.getOrderStatus = async (req, res, next) => {
+const getOrderStatus = async (req, res, next) => {
   try {
     const { orderId } = req.params;
     const order = await Order.findOne({ _id: orderId, customerId: req.user._id }).lean();
     if (!order) return res.status(404).json({ message: 'Order not found' });
+
     res.json({ status: order.lifecycleStatus.current });
   } catch (error) {
     next(error);
   }
 };
 
-// Upload progress photo
-exports.uploadProgressPhoto = async (req, res, next) => {
+const uploadProgressPhoto = async (req, res, next) => {
   try {
     const { orderId } = req.params;
     if (!req.file) return res.status(400).json({ message: 'No photo uploaded' });
@@ -168,8 +169,10 @@ exports.uploadProgressPhoto = async (req, res, next) => {
   }
 };
 
-// Customer profile management
-exports.getProfile = async (req, res, next) => {
+// =========================
+// Profile
+// =========================
+const getProfile = async (req, res, next) => {
   try {
     const user = req.user;
     res.json({
@@ -184,7 +187,7 @@ exports.getProfile = async (req, res, next) => {
   }
 };
 
-exports.updateProfile = async (req, res, next) => {
+const updateProfile = async (req, res, next) => {
   try {
     const { contact, notificationPreferences } = req.body;
     const user = req.user;
@@ -193,41 +196,18 @@ exports.updateProfile = async (req, res, next) => {
     if (notificationPreferences) user.notificationPreferences = notificationPreferences;
 
     await user.save();
-
     res.json({ message: 'Profile updated successfully' });
   } catch (error) {
     next(error);
   }
 };
 
-// Secure measurements vault
-const algorithm = 'aes-256-cbc';
-const key = crypto.createHash('sha256').update(String(process.env.MEASUREMENT_ENCRYPT_KEY || 'defaultkey')).digest('base64').substr(0, 32);
-const iv = crypto.randomBytes(16);
-
-const encryptField = (data) => {
-  const ivBuf = crypto.randomBytes(16);
-  const cipher = crypto.createCipheriv(algorithm, key, ivBuf);
-  let encrypted = cipher.update(JSON.stringify(data), 'utf8', 'hex');
-  encrypted += cipher.final('hex');
-  return {
-    iv: ivBuf.toString('hex'),
-    content: encrypted,
-  };
-};
-
-const decryptField = (encrypted) => {
-  const ivBuf = Buffer.from(encrypted.iv, 'hex');
-  const decipher = crypto.createDecipheriv(algorithm, key, ivBuf);
-  let decrypted = decipher.update(encrypted.content, 'hex', 'utf8');
-  decrypted += decipher.final('utf8');
-  return JSON.parse(decrypted);
-};
-
-exports.createMeasurement = async (req, res, next) => {
+// =========================
+// Measurements
+// =========================
+const createMeasurement = async (req, res, next) => {
   try {
     const { measurements, templateId, tailorId, familyProfileId } = req.body;
-
     const encryptedMeasurements = encryptField(measurements);
 
     const newMeasurement = await new Measurement({
@@ -247,7 +227,7 @@ exports.createMeasurement = async (req, res, next) => {
   }
 };
 
-exports.listMeasurements = async (req, res, next) => {
+const listMeasurements = async (req, res, next) => {
   try {
     const measurements = await Measurement.find({ customerId: req.user._id }).lean();
     const decryptedMeasurements = measurements.map((m) => ({
@@ -263,7 +243,7 @@ exports.listMeasurements = async (req, res, next) => {
   }
 };
 
-exports.updateMeasurement = async (req, res, next) => {
+const updateMeasurement = async (req, res, next) => {
   try {
     const { measurementId } = req.params;
     const { measurements } = req.body;
@@ -271,7 +251,6 @@ exports.updateMeasurement = async (req, res, next) => {
     if (!measurement) return res.status(404).json({ message: 'Measurement not found' });
 
     const encryptedMeasurements = encryptField(measurements);
-
     measurement.encryptedMeasurements = encryptedMeasurements;
     measurement.versionHistory.push({ measurements: encryptedMeasurements, updatedAt: new Date() });
     measurement.updatedAt = new Date();
@@ -283,7 +262,7 @@ exports.updateMeasurement = async (req, res, next) => {
   }
 };
 
-exports.deleteMeasurement = async (req, res, next) => {
+const deleteMeasurement = async (req, res, next) => {
   try {
     const { measurementId } = req.params;
     await Measurement.deleteOne({ _id: measurementId, customerId: req.user._id });
@@ -293,26 +272,21 @@ exports.deleteMeasurement = async (req, res, next) => {
   }
 };
 
-// Family profiles linking shared measurement access
-exports.listFamilyProfiles = async (req, res, next) => {
-  try {
-    // For demo purpose, returning empty array (needs FamilyProfile model)
-    res.json([]);
-  } catch (error) {
-    next(error);
-  }
+// =========================
+// Family Profiles
+// =========================
+const listFamilyProfiles = async (req, res, next) => {
+  res.json([]); // placeholder
 };
 
-exports.createFamilyProfile = async (req, res, next) => {
-  try {
-    res.status(201).json({ message: 'Create family profile - to be implemented' });
-  } catch (error) {
-    next(error);
-  }
+const createFamilyProfile = async (req, res, next) => {
+  res.status(201).json({ message: 'Create family profile - to be implemented' });
 };
 
-// Reviews and ratings management
-exports.submitReview = async (req, res, next) => {
+// =========================
+// Reviews
+// =========================
+const submitReview = async (req, res, next) => {
   try {
     const { tailorId, ratings, reviewText, photos, isVerifiedPurchase } = req.body;
 
@@ -333,7 +307,7 @@ exports.submitReview = async (req, res, next) => {
   }
 };
 
-exports.listReviews = async (req, res, next) => {
+const listReviews = async (req, res, next) => {
   try {
     const { tailorId } = req.params;
     const reviews = await Review.find({ tailorId, moderationStatus: 'approved' }).lean();
@@ -343,7 +317,7 @@ exports.listReviews = async (req, res, next) => {
   }
 };
 
-exports.reportReview = async (req, res, next) => {
+const reportReview = async (req, res, next) => {
   try {
     const { reviewId } = req.params;
     const { reason } = req.body;
@@ -351,11 +325,7 @@ exports.reportReview = async (req, res, next) => {
     if (!review) return res.status(404).json({ message: 'Review not found' });
 
     review.communityReports = review.communityReports || [];
-    review.communityReports.push({
-      userId: req.user._id,
-      reason,
-      reportedAt: new Date(),
-    });
+    review.communityReports.push({ userId: req.user._id, reason, reportedAt: new Date() });
     await review.save();
 
     res.json({ message: 'Review reported for moderation' });
@@ -364,28 +334,46 @@ exports.reportReview = async (req, res, next) => {
   }
 };
 
-// Referral system
-exports.getReferralStatus = async (req, res, next) => {
-  try {
-    res.json({ message: 'Referral status - to be implemented' });
-  } catch (error) {
-    next(error);
-  }
+// =========================
+// Referrals & Social
+// =========================
+const getReferralStatus = async (req, res, next) => {
+  res.json({ message: 'Referral status - to be implemented' });
 };
 
-exports.sendReferralInvite = async (req, res, next) => {
-  try {
-    res.json({ message: 'Send referral invite - to be implemented' });
-  } catch (error) {
-    next(error);
-  }
+const sendReferralInvite = async (req, res, next) => {
+  res.json({ message: 'Send referral invite - to be implemented' });
 };
 
-// Social sharing endpoints
-exports.shareOnSocialMedia = async (req, res, next) => {
-  try {
-    res.json({ message: 'Social media sharing - to be implemented' });
-  } catch (error) {
-    next(error);
-  }
+const shareOnSocialMedia = async (req, res, next) => {
+  res.json({ message: 'Social media sharing - to be implemented' });
+};
+
+// =========================
+// Exports
+// =========================
+export {
+  searchTailors,
+  getRecommendations,
+  getEventsCalendar,
+  placeOrder,
+  getOrderTracking,
+  getOrderHistory,
+  makePayment,
+  getOrderStatus,
+  uploadProgressPhoto,
+  getProfile,
+  updateProfile,
+  createMeasurement,
+  listMeasurements,
+  updateMeasurement,
+  deleteMeasurement,
+  listFamilyProfiles,
+  createFamilyProfile,
+  submitReview,
+  listReviews,
+  reportReview,
+  getReferralStatus,
+  sendReferralInvite,
+  shareOnSocialMedia,
 };

@@ -1,107 +1,63 @@
-const admin = require('firebase-admin');
-const nodemailer = require('nodemailer');
-const twilio = require('twilio');
-const Notification = require('../models/Notification');
-const logger = require('../utils/logger');
+import Notification from "../models/Notification.js";
+import { socketService } from "../messaging_feature/socket.js";
+import User from "../models/User.js";
+import { UserRole } from "../models/userRole.js";
 
-// Initialize Firebase Admin SDK with service account
-if (!admin.apps.length) {
-  const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT
-    ? JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)
-    : null;
-  if (serviceAccount) {
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount),
+class NotificationService {
+  async sendNotification({ userId, title, message, type = "General" }) {
+    if (!userId || !title || !message) {
+      throw new Error("Notification requires userId, title, and message");
+    }
+
+    const notification = await Notification.create({
+      userId,
+      title,
+      message,
+      type,
     });
+
+    socketService.emitToUser(userId, "notification", notification);
+
+    return notification;
+  }
+
+  async sendToCustomer({ userId, title, message, type = "General" }) {
+    return this.sendNotification({ userId, title, message, type });
+  }
+
+  async sendToGroomer({ userId, title, message, type = "General" }) {
+    return this.sendNotification({ userId, title, message, type });
+  }
+
+  async sendToAdmin({ title, message, type = "General" }) {
+    // 1️⃣ Find admin role
+    const adminRole = await UserRole.findOne({ name: "admin", role_id: 1 });
+    if (!adminRole) {
+      throw new Error("Admin role not found");
+    }
+
+    // 2️⃣ Find all users with admin role
+    const adminUsers = await User.find({ user_role: adminRole._id });
+
+    if (!adminUsers.length) {
+      throw new Error("No admin users found");
+    }
+
+    // 3️⃣ Send notification to each admin
+    const notifications = [];
+    for (const admin of adminUsers) {
+      notifications.push(
+        this.sendNotification({
+          userId: admin._id,
+          title,
+          message,
+          type,
+        })
+      );
+    }
+
+    return Promise.all(notifications);
   }
 }
 
-// Nodemailer transporter setup
-const transporter = nodemailer.createTransport({
-  host: process.env.EMAIL_HOST || 'smtp.example.com',
-  port: parseInt(process.env.EMAIL_PORT) || 587,
-  secure: false,
-  auth: {
-    user: process.env.EMAIL_USER || '',
-    pass: process.env.EMAIL_PASS || '',
-  },
-});
-
-// Twilio client setup
-const twilioClient = twilio(
-  process.env.TWILIO_ACCOUNT_SID || '',
-  process.env.TWILIO_AUTH_TOKEN || ''
-);
-
-exports.sendPushNotification = async (userId, message) => {
-  try {
-    // Retrieve push subscription for user
-    const notification = await Notification.findOne({ userId, type: 'push' });
-    if (!notification || !notification.subscription) {
-      logger.warn(`No push subscription found for user ${userId}`);
-      return;
-    }
-    const payload = {
-      notification: {
-        title: 'Notification',
-        body: message,
-      },
-      data: { message },
-    };
-    await admin.messaging().sendToDevice(notification.subscription.tokens || [], payload);
-    logger.info(`Push notification sent to user ${userId}`);
-  } catch (err) {
-    logger.error('Error sending push notification:', err);
-  }
-};
-
-exports.sendSms = async (to, message) => {
-  try {
-    if (!twilioClient) throw new Error('Twilio client not initialized');
-    await twilioClient.messages.create({
-      body: message,
-      from: process.env.TWILIO_PHONE_NUMBER,
-      to,
-    });
-    logger.info(`SMS sent to ${to}`);
-  } catch (err) {
-    logger.error(`Error sending SMS to ${to}`, err);
-  }
-};
-
-exports.sendEmail = async (to, subject, text, html) => {
-  try {
-    await transporter.sendMail({
-      from: process.env.EMAIL_FROM || 'noreply@example.com',
-      to,
-      subject,
-      text,
-      html,
-    });
-    logger.info(`Email sent to ${to}`);
-  } catch (err) {
-    logger.error(`Error sending email to ${to}`, err);
-  }
-};
-
-exports.sendBulkNotifications = async (notifications) => {
-  for (const noti of notifications) {
-    try {
-      switch (noti.type) {
-        case 'push':
-          await exports.sendPushNotification(noti.userId, noti.message);
-          break;
-        case 'sms':
-          // For SMS, we need user contact info
-          // Assuming user model relationship or notification metadata has phone
-          break;
-        case 'email':
-          // For email, user email needed
-          // Assuming notification has email metadata
-          break;
-      }
-    } catch (err) {
-      logger.error(`Error sending notification to user ${noti.userId}: ${err}`);
-    }
-  }
-};
+export default new NotificationService();

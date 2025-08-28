@@ -1,6 +1,6 @@
-const axios = require('axios');
-const Order = require('../models/Order');
-const logger = require('../utils/logger');
+import axios from 'axios';
+import Order from '../models/Order.js';
+import logger from '../utils/logger.js';
 
 // Carrier API integration configs (stubs)
 const carrierAPIs = {
@@ -9,8 +9,8 @@ const carrierAPIs = {
   localCouriers: process.env.CARRIER_LOCAL_COURIERS_API_URL || '',
 };
 
-exports.checkCarriersStatus = async (req, res, next) => {
-  // Check all carrier APIs for availability (dummy implementation)
+// Check all carrier APIs for availability (dummy implementation)
+const checkCarriersStatus = async (req, res, next) => {
   try {
     const status = {
       aramex: true,
@@ -24,10 +24,9 @@ exports.checkCarriersStatus = async (req, res, next) => {
 };
 
 // Dynamic delivery pricing
-exports.calculateDeliveryPrice = async (req, res, next) => {
+const calculateDeliveryPrice = async (req, res, next) => {
   try {
     const { pickupLocation, deliveryLocation, urgency } = req.body;
-    // Distance calculation stub (normally use external API)
     const basePrice = 50; // base AED
     let distanceKm = 10; // Dummy - should be distance between points
     let urgencyMultiplier = urgency === 'rush' ? 1.5 : 1;
@@ -42,7 +41,7 @@ exports.calculateDeliveryPrice = async (req, res, next) => {
 };
 
 // Scheduling deliveries
-exports.scheduleDelivery = async (req, res, next) => {
+const scheduleDelivery = async (req, res, next) => {
   try {
     const { orderId, preferredDateTime } = req.body;
     const order = await Order.findById(orderId);
@@ -53,14 +52,13 @@ exports.scheduleDelivery = async (req, res, next) => {
     order.deliveryCoordination.confirmed = false;
 
     await order.save();
-
     res.json({ message: 'Delivery scheduled. Awaiting confirmation.' });
   } catch (error) {
     next(error);
   }
 };
 
-exports.getDeliverySchedule = async (req, res, next) => {
+const getDeliverySchedule = async (req, res, next) => {
   try {
     const { deliveryId } = req.params;
     const order = await Order.findOne({ _id: deliveryId }).lean();
@@ -73,7 +71,7 @@ exports.getDeliverySchedule = async (req, res, next) => {
 };
 
 // Return logistics
-exports.initiateReturn = async (req, res, next) => {
+const initiateReturn = async (req, res, next) => {
   try {
     const { orderId, reason, photos } = req.body;
     const order = await Order.findById(orderId);
@@ -94,7 +92,7 @@ exports.initiateReturn = async (req, res, next) => {
   }
 };
 
-exports.getReturnStatus = async (req, res, next) => {
+const getReturnStatus = async (req, res, next) => {
   try {
     const { returnId } = req.params;
     const order = await Order.findById(returnId).lean();
@@ -107,10 +105,9 @@ exports.getReturnStatus = async (req, res, next) => {
 };
 
 // Shipment tracking
-exports.getShipmentTracking = async (req, res, next) => {
+const getShipmentTracking = async (req, res, next) => {
   try {
     const { shipmentId } = req.params;
-    // For demo, shipmentId == orderId
     const order = await Order.findById(shipmentId).lean();
     if (!order) return res.status(404).json({ message: 'Shipment not found' });
 
@@ -121,7 +118,7 @@ exports.getShipmentTracking = async (req, res, next) => {
 };
 
 // Update shipment status (admin only)
-exports.updateShipmentStatus = async (req, res, next) => {
+const updateShipmentStatus = async (req, res, next) => {
   try {
     const { shipmentId } = req.params;
     const { status, courierGPS } = req.body;
@@ -137,9 +134,19 @@ exports.updateShipmentStatus = async (req, res, next) => {
     order.deliveryCoordination.updatedAt = new Date();
 
     await order.save();
-
     res.json({ message: 'Shipment status updated' });
   } catch (error) {
     next(error);
   }
+};
+
+export {
+  checkCarriersStatus,
+  calculateDeliveryPrice,
+  scheduleDelivery,
+  getDeliverySchedule,
+  initiateReturn,
+  getReturnStatus,
+  getShipmentTracking,
+  updateShipmentStatus,
 };

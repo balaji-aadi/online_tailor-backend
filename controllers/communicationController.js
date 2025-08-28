@@ -1,11 +1,12 @@
-const Chat = require('../models/Chat');
-const Notification = require('../models/Notification');
-const notificationService = require('../services/notificationService');
-const logger = require('../utils/logger');
-const mongoose = require('mongoose');
+import Chat from '../models/Chat.js';
+import Notification from '../models/Notification.js';
+import * as notificationService from '../services/notificationService.js';
+import logger from '../utils/logger.js';
+import mongoose from 'mongoose';
+
 
 // Real-time chat message management
-exports.listConversations = async (req, res, next) => {
+const listConversations = async (req, res, next) => {
   try {
     const conversations = await Chat.find({ participants: req.user._id })
       .select('participants lastMessage updatedAt')
@@ -18,7 +19,7 @@ exports.listConversations = async (req, res, next) => {
   }
 };
 
-exports.sendMessage = async (req, res, next) => {
+const sendMessage = async (req, res, next) => {
   try {
     const { conversationId, message } = req.body;
 
@@ -45,7 +46,7 @@ exports.sendMessage = async (req, res, next) => {
 
     await chat.save();
 
-    // Send realtime push notification to other participants asynchronously
+    // Send realtime push notification asynchronously
     chat.participants.forEach((participant) => {
       if (participant.toString() !== req.user._id.toString()) {
         notificationService.sendPushNotification(participant, `New message: ${message}`)
@@ -59,15 +60,19 @@ exports.sendMessage = async (req, res, next) => {
   }
 };
 
-exports.getMessages = async (req, res, next) => {
+const getMessages = async (req, res, next) => {
   try {
     const { conversationId } = req.params;
-    if (!mongoose.Types.ObjectId.isValid(conversationId)) return res.status(400).json({ message: 'Invalid conversationId' });
+    if (!mongoose.Types.ObjectId.isValid(conversationId)) {
+      return res.status(400).json({ message: 'Invalid conversationId' });
+    }
 
     const chat = await Chat.findById(conversationId).lean();
     if (!chat) return res.status(404).json({ message: 'Conversation not found' });
 
-    if (!chat.participants.includes(req.user._id)) return res.status(403).json({ message: 'Not participant' });
+    if (!chat.participants.includes(req.user._id)) {
+      return res.status(403).json({ message: 'Not participant' });
+    }
 
     res.json(chat.messages);
   } catch (error) {
@@ -75,12 +80,13 @@ exports.getMessages = async (req, res, next) => {
   }
 };
 
-exports.deleteMessage = async (req, res, next) => {
+const deleteMessage = async (req, res, next) => {
   try {
     const { messageId } = req.params;
-    if (!mongoose.Types.ObjectId.isValid(messageId)) return res.status(400).json({ message: 'Invalid messageId' });
+    if (!mongoose.Types.ObjectId.isValid(messageId)) {
+      return res.status(400).json({ message: 'Invalid messageId' });
+    }
 
-    // Find which chat contains message and confirm ownership
     const chat = await Chat.findOne({ 'messages._id': messageId, 'messages.senderId': req.user._id });
     if (!chat) return res.status(404).json({ message: 'Message not found or no permission' });
 
@@ -94,7 +100,7 @@ exports.deleteMessage = async (req, res, next) => {
 };
 
 // Push notifications subscription management
-exports.subscribeToPushNotifications = async (req, res, next) => {
+const subscribeToPushNotifications = async (req, res, next) => {
   try {
     const { subscription } = req.body;
     if (!subscription) return res.status(400).json({ message: 'Subscription object required' });
@@ -111,7 +117,7 @@ exports.subscribeToPushNotifications = async (req, res, next) => {
   }
 };
 
-exports.unsubscribeFromPushNotifications = async (req, res, next) => {
+const unsubscribeFromPushNotifications = async (req, res, next) => {
   try {
     await Notification.deleteOne({ userId: req.user._id, type: 'push' });
     res.json({ message: 'Unsubscribed from push notifications' });
@@ -120,7 +126,7 @@ exports.unsubscribeFromPushNotifications = async (req, res, next) => {
   }
 };
 
-exports.sendPushNotification = async (req, res, next) => {
+const sendPushNotification = async (req, res, next) => {
   try {
     const { userId, message } = req.body;
     await notificationService.sendPushNotification(userId, message);
@@ -130,7 +136,7 @@ exports.sendPushNotification = async (req, res, next) => {
   }
 };
 
-exports.sendSmsAlert = async (req, res, next) => {
+const sendSmsAlert = async (req, res, next) => {
   try {
     const { phoneNumber, message } = req.body;
     await notificationService.sendSms(phoneNumber, message);
@@ -140,7 +146,7 @@ exports.sendSmsAlert = async (req, res, next) => {
   }
 };
 
-exports.sendEmailNotification = async (req, res, next) => {
+const sendEmailNotification = async (req, res, next) => {
   try {
     const { email, subject, text, html } = req.body;
     await notificationService.sendEmail(email, subject, text, html);
@@ -151,7 +157,7 @@ exports.sendEmailNotification = async (req, res, next) => {
 };
 
 // Subscription preferences retrieval and update
-exports.getSubscriptions = async (req, res, next) => {
+const getSubscriptions = async (req, res, next) => {
   try {
     const subs = await Notification.find({ userId: req.user._id });
     res.json(subs);
@@ -160,9 +166,9 @@ exports.getSubscriptions = async (req, res, next) => {
   }
 };
 
-exports.updateNotificationPreferences = async (req, res, next) => {
+const updateNotificationPreferences = async (req, res, next) => {
   try {
-    const { preferences } = req.body; // e.g., { push: true, email: false, sms: true }
+    const { preferences } = req.body;
     req.user.notificationPreferences = preferences;
     await req.user.save();
     res.json({ message: 'Notification preferences updated' });
@@ -172,7 +178,7 @@ exports.updateNotificationPreferences = async (req, res, next) => {
 };
 
 // Message history retrieval with pagination
-exports.getAllMessages = async (req, res, next) => {
+const getAllMessages = async (req, res, next) => {
   try {
     const { limit = 50, page = 1 } = req.query;
     const messages = await Chat.aggregate([
@@ -197,11 +203,13 @@ exports.getAllMessages = async (req, res, next) => {
 };
 
 // Message moderation by admin
-exports.moderateMessage = async (req, res, next) => {
+const moderateMessage = async (req, res, next) => {
   try {
     const { messageId, action } = req.body;
-    if (!mongoose.Types.ObjectId.isValid(messageId)) return res.status(400).json({ message: 'Invalid messageId' });
-    // action: approve, flag, remove
+    if (!mongoose.Types.ObjectId.isValid(messageId)) {
+      return res.status(400).json({ message: 'Invalid messageId' });
+    }
+
     const chat = await Chat.findOne({ 'messages._id': messageId });
     if (!chat) return res.status(404).json({ message: 'Message not found' });
 
@@ -226,4 +234,21 @@ exports.moderateMessage = async (req, res, next) => {
   } catch (error) {
     next(error);
   }
+};
+
+// Export all controllers at the bottom
+export {
+  listConversations,
+  sendMessage,
+  getMessages,
+  deleteMessage,
+  subscribeToPushNotifications,
+  unsubscribeFromPushNotifications,
+  sendPushNotification,
+  sendSmsAlert,
+  sendEmailNotification,
+  getSubscriptions,
+  updateNotificationPreferences,
+  getAllMessages,
+  moderateMessage,
 };

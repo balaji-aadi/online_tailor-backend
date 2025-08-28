@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+import mongoose from 'mongoose';
 
 const versionHistorySchema = new mongoose.Schema({
   measurements: {
@@ -22,12 +22,11 @@ const measurementSchema = new mongoose.Schema(
     versionHistory: [versionHistorySchema],
     tailorVerifications: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
     templateId: { type: String },
-    familyProfile: { type: mongoose.Schema.Types.ObjectId, ref: 'FamilyProfile' },
+    // familyProfile: { type: mongoose.Schema.Types.ObjectId, ref: 'FamilyProfile' },
     accessControl: accessControlSchema,
   },
   { timestamps: true }
 );
 
 const Measurement = mongoose.model('Measurement', measurementSchema);
-
-module.exports = Measurement;
+export default Measurement;

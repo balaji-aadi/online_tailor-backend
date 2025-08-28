@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+import mongoose from 'mongoose';
 
 const seoMetadataSchema = new mongoose.Schema({
   title: { type: String },
@@ -33,5 +33,4 @@ const contentSchema = new mongoose.Schema(
 );
 
 const Content = mongoose.model('Content', contentSchema);
-
-module.exports = Content;
+export default Content;
