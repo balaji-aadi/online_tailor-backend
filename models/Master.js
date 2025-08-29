@@ -98,7 +98,7 @@ const locationSchema = new Schema(
   {
     user: { type: Schema.Types.ObjectId, ref: "User", required: true }, 
     country: { type: Schema.Types.ObjectId, ref: "Country", required: true },
-    city: { type: Schema.Types.ObjectId, ref: "Location", required: true }, 
+    city: { type: Schema.Types.ObjectId, ref: "City", required: true }, 
     street: { type: String, required: true },
     coordinates: {
       type: { type: String, enum: ["Point"], default: "Point" },
@@ -110,6 +110,43 @@ const locationSchema = new Schema(
 );
 
 locationSchema.index({ coordinates: "2dsphere" });
+
+const specialtySchema = new mongoose.Schema(
+  {
+    name: {
+      type: String,
+      required: true,
+      maxlength: 250,
+      unique: true,
+    },
+  },
+  {
+    timestamps: true,
+    versionKey: false,
+  }
+);
+
+
+const fabricSchema = new Schema(
+  {
+    name: { type: String, required: true },
+    code: { type: String, required: true, unique: true },
+    description: { type: String, default: "" },
+    image: { type: String, default: "" }, // Cloudinary URL
+    status: {
+      type: String,
+      enum: ["pending", "active", "rejected"],
+      default: "pending",
+    },
+    createdBy: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    rejectReason: { type: String, default: "" },
+  },
+  { timestamps: true, versionKey: false }
+);
+
+export const Fabric=  mongoose.model("Fabric", fabricSchema);
+
+export const Specialty = mongoose.model('Specialty', specialtySchema);
 
 const LocationMaster = mongoose.model("LocationMaster", locationSchema);
 export default LocationMaster;

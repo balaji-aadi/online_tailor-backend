@@ -6,8 +6,20 @@ import {
   validateProfileUpdate,
 } from "../validators/customerValidators.js";
 import multer from "../middleware/multer.middleware.js";
+import { getUserById } from "../controllers/user.controller.js";
 
 const router = express.Router();
+
+
+
+
+router.post("/user-register",multer.uploadUserFiles(),customerController.registerCustomer);
+router.get("/get-user-profile",customerController.getLoggedInCustomer);
+router.get("/get-user-profile/:customerId",customerController.getCustomerById);
+router.put("/update-customer-profile/:userId", multer.uploadUserFiles(), customerController.updateCustomer);
+router.delete("/delete-customer-profile/:userId", customerController.deleteCustomer);
+router.put("/update-user-measurements/:customerId", customerController.updateCustomerMeasurements);
+
 
 /** ---------------- PUBLIC ROUTES ---------------- */
 router.post("/discovery/search", customerController.searchTailors);
@@ -26,10 +38,6 @@ router.post("/orders/:orderId/photo-update",multer.uploadSingle("progressPhoto")
 /** Personal management */
 router.get("/profile", customerController.getProfile);
 router.put("/profile", validateProfileUpdate, customerController.updateProfile);
-router.post("/measurements", customerController.createMeasurement);
-router.get("/measurements", customerController.listMeasurements);
-router.put("/measurements/:measurementId", customerController.updateMeasurement);
-router.delete("/measurements/:measurementId", customerController.deleteMeasurement);
 router.get("/family-profiles", customerController.listFamilyProfiles);
 router.post("/family-profiles", customerController.createFamilyProfile);
 

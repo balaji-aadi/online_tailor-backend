@@ -19,6 +19,8 @@ import {
   updateUserRole,
   verifyUser,
   whitelistUser,
+  verifyTailorAccount,
+  getAllUsers,
 } from "../controllers/adminController.js";
 import {
   getBusinessIntelligence,
@@ -41,13 +43,10 @@ router.post("/logout", logoutUser);
 
 
 // User verification and approval
-router.post(
-  "/users/verify",
-  validateAdminUserVerification,
-  verifyJWT,
-  verifyUser
-);
+router.post( "/users/verify",validateAdminUserVerification,verifyJWT,verifyUser);
 router.post("/users/approve", approveUser);
+router.post("/tailors-status-update", verifyTailorAccount);
+router.get("/users", getAllUsers);
 router.put("/users/roles/:userId", updateUserRole);
 
 // Bulk import/export

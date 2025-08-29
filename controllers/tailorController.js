@@ -1,107 +1,187 @@
-import {asyncHandler} from "../utils/asyncHandler.js";
-import {ApiResponse} from "../utils/ApiResponse.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
+import { ApiResponse } from "../utils/ApiResponse.js";
 import { ApiError } from "../utils/ApiError.js";
-import TailorProfile from "../models/TailorProfile.js";
 import Order from "../models/Order.js";
-import fs from "fs";
-import path from "path";
+import User from "../models/User.js";
+import mongoose from "mongoose";
 
-// ✅ Get Tailor Profile
-const getProfile = asyncHandler(async (req, res) => {
-  const profile = await TailorProfile.findOne({ userId: req.user._id }).lean();
-  if (!profile) {
-    return res
-      .status(404)
-      .json(new ApiResponse(404, null, "Profile not found"));
-  }
-  return res
-    .status(200)
-    .json(new ApiResponse(200, profile, "Profile fetched successfully"));
-});
+// const getUserById = asyncHandler(async (req, res) => {
+//   const { userId } = req.params;
 
-// ✅ Update Tailor Profile
-const updateProfile = asyncHandler(async (req, res) => {
-  const updates = req.body;
+//   // Validate userId
+//   if (!mongoose.Types.ObjectId.isValid(userId)) {
+//     return res.status(400).json(new ApiResponse(400, null, "Invalid userId"));
+//   }
 
-  let profile = await TailorProfile.findOne({ userId: req.user._id });
-  if (!profile) {
-    profile = new TailorProfile({ userId: req.user._id });
-  }
+//   // Fetch user
+//   const user = await User.findById(userId)
+//     .populate("user_role country city tailorInfo.professionalInfo.specialties")
+//     .select("-password -refreshToken -otp -otp_time");
 
-  Object.assign(profile, updates, { updatedAt: new Date() });
-  await profile.save();
+//   if (!user) {
+//     return res.status(404).json(new ApiResponse(404, null, "User not found"));
+//   }
 
-  return res
-    .status(200)
-    .json(new ApiResponse(200, profile, "Profile updated successfully"));
-});
+//   return res
+//     .status(200)
+//     .json(new ApiResponse(200, user, "User details fetched successfully"));
+// });
 
-// ✅ Upload Portfolio
-const uploadPortfolio = asyncHandler(async (req, res) => {
-  if (!req.files?.length) {
-    throw new ApiError(400, "No portfolio images uploaded");
-  }
+// const updateUserById = asyncHandler(async (req, res) => {
+//   const { userId } = req.params;
 
-  const profile = await TailorProfile.findOne({ userId: req.user._id });
-  if (!profile) throw new ApiError(404, "Profile not found");
+//   if (!mongoose.Types.ObjectId.isValid(userId)) {
+//     return res.status(400).json(new ApiResponse(400, null, "Invalid userId"));
+//   }
 
-  req.files.forEach((file) => {
-    profile.multimediaPortfolio.push({
-      url: `/uploads/${file.filename}`,
-      filename: file.originalname,
-      filetype: file.mimetype,
-      size: file.size,
-      uploadedAt: new Date(),
-    });
-  });
+//   let user = await User.findById(userId);
+//   if (!user) {
+//     return res.status(404).json(new ApiResponse(404, null, "User not found"));
+//   }
 
-  await profile.save();
+//   let {
+//     email,
+//     ownerName,
+//     businessName,
+//     country,
+//     password,
+//     whatsapp,
+//     locations,
+//     gender,
+//     specialties,
+//     experience,
+//     description,
+//     homeMeasurement,
+//     rushOrders,
+//     emiratesIdExpiry,
+//     socialMedia,
+//   } = req.body;
 
-  return res.status(201).json(
-    new ApiResponse(
-      201,
-      profile.multimediaPortfolio,
-      `${req.files.length} portfolio images uploaded`
-    )
-  );
-});
+//   // Parse JSON safely
+//   try {
+//     specialties = specialties ? JSON.parse(specialties) : [];
+//     locations = locations ? JSON.parse(locations) : [];
+//     socialMedia = socialMedia ? JSON.parse(socialMedia) : {};
+//   } catch (parseErr) {
+//     throw new ApiError(
+//       400,
+//       "Invalid JSON format in specialties, locations, or socialMedia"
+//     );
+//   }
 
-// ✅ List Portfolio
-const listPortfolio = asyncHandler(async (req, res) => {
-  const profile = await TailorProfile.findOne({ userId: req.user._id }).lean();
-  if (!profile) throw new ApiError(404, "Profile not found");
+//   // Update fields
+//   if (email) user.email = email;
+//   if (ownerName) user.ownerName = ownerName;
+//   if (businessName) user.businessName = businessName;
+//   if (country) user.country = country;
+//   if (password) user.password = password;
 
-  return res
-    .status(200)
-    .json(new ApiResponse(200, profile.multimediaPortfolio || [], "Portfolio fetched"));
-});
+//   // Tailor-specific updates
+//   if (
+//     user.user_role &&
+//     (user.user_role.role_id === 2 || /tailor/i.test(user.user_role.name || ""))
+//   ) {
+//     user.tailorInfo = user.tailorInfo || {};
+//     user.tailorInfo.businessInfo = user.tailorInfo.businessInfo || {};
+//     user.tailorInfo.professionalInfo = user.tailorInfo.professionalInfo || {};
+//     user.tailorInfo.services = user.tailorInfo.services || {};
+//     user.tailorInfo.documents = user.tailorInfo.documents || {};
+//     user.tailorInfo.additionalInfo = user.tailorInfo.additionalInfo || {
+//       socialMedia: {},
+//     };
 
-// ✅ Delete Portfolio File
-const deletePortfolioFile = asyncHandler(async (req, res) => {
-  const { fileId } = req.params;
-  const profile = await TailorProfile.findOne({ userId: req.user._id });
-  if (!profile) throw new ApiError(404, "Profile not found");
+//     if (ownerName) user.tailorInfo.businessInfo.ownerName = ownerName;
+//     if (businessName) user.tailorInfo.businessInfo.businessName = businessName;
+//     if (whatsapp) user.tailorInfo.businessInfo.whatsapp = whatsapp;
+//     if (locations.length) user.tailorInfo.businessInfo.locations = locations;
+//     if (gender) user.tailorInfo.professionalInfo.gender = gender;
+//     if (specialties.length) {
+//       const validSpecialties = await Specialty.find({
+//         _id: { $in: specialties },
+//       });
+//       user.tailorInfo.professionalInfo.specialties = validSpecialties.map(
+//         (s) => ({ _id: s._id, name: s.name })
+//       );
+//     }
+//     if (experience) user.tailorInfo.professionalInfo.experience = experience;
+//     if (description) user.tailorInfo.professionalInfo.description = description;
+//     if (homeMeasurement !== undefined)
+//       user.tailorInfo.services.homeMeasurement = homeMeasurement;
+//     if (rushOrders !== undefined)
+//       user.tailorInfo.services.rushOrders = rushOrders;
+//     if (emiratesIdExpiry) user.tailorInfo.emiratesIdExpiry = emiratesIdExpiry;
+//     if (socialMedia) user.tailorInfo.additionalInfo.socialMedia = socialMedia;
 
-  const fileIndex = profile.multimediaPortfolio.findIndex(
-    (file) => file._id.toString() === fileId
-  );
-  if (fileIndex === -1) throw new ApiError(404, "Portfolio file not found");
+//     // Handle document uploads via Cloudinary
+//     const files = req.files || {};
+//     const uploadFiles = async (fileArray, oldFiles = []) => {
+//       if (!fileArray) return oldFiles;
+//       const uploadPromises = fileArray.map((file) =>
+//         uploadOnCloudinary(file.path)
+//       );
+//       const results = await Promise.all(uploadPromises);
+//       return results.filter((r) => r).map((r) => r.secure_url);
+//     };
 
-  const fileToDelete = profile.multimediaPortfolio[fileIndex];
-  profile.multimediaPortfolio.splice(fileIndex, 1);
-  await profile.save();
+//     user.tailorInfo.documents.emiratesId = await uploadFiles(
+//       files.emiratesId,
+//       user.tailorInfo.documents.emiratesId
+//     );
+//     user.tailorInfo.documents.tradeLicense = await uploadFiles(
+//       files.tradeLicense,
+//       user.tailorInfo.documents.tradeLicense
+//     );
+//     user.tailorInfo.documents.certificates = await uploadFiles(
+//       files.certificates,
+//       user.tailorInfo.documents.certificates
+//     );
+//     user.tailorInfo.documents.portfolioImages = await uploadFiles(
+//       files.portfolioImages,
+//       user.tailorInfo.documents.portfolioImages
+//     );
+//   }
 
-  const filePath = path.join(
-    process.cwd(),
-    "uploads",
-    path.basename(fileToDelete.url)
-  );
-  if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+//   await user.save();
 
-  return res
-    .status(200)
-    .json(new ApiResponse(200, null, "Portfolio file deleted successfully"));
-});
+//   const updatedUser = await User.findById(userId)
+//     .populate("user_role country city tailorInfo.professionalInfo.specialties")
+//     .select("-password -refreshToken -otp -otp_time");
+
+//   return res
+//     .status(200)
+//     .json(new ApiResponse(200, updatedUser, "User updated successfully"));
+// });
+
+// const deleteUserById = asyncHandler(async (req, res) => {
+//   const { userId } = req.params;
+
+//   if (!mongoose.Types.ObjectId.isValid(userId)) {
+//     return res.status(400).json(new ApiResponse(400, null, "Invalid userId"));
+//   }
+
+//   const user = await User.findById(userId);
+//   if (!user) {
+//     return res.status(404).json(new ApiResponse(404, null, "User not found"));
+//   }
+
+//   // Delete documents from Cloudinary
+//   if (user.tailorInfo?.documents) {
+//     const { emiratesId, tradeLicense, certificates, portfolioImages } =
+//       user.tailorInfo.documents;
+//     await Promise.all([
+//       deleteFromCloudinary(emiratesId),
+//       deleteFromCloudinary(tradeLicense),
+//       deleteFromCloudinary(certificates),
+//       deleteFromCloudinary(portfolioImages),
+//     ]);
+//   }
+
+//   await User.deleteOne({ _id: userId });
+
+//   return res
+//     .status(200)
+//     .json(new ApiResponse(200, null, "User deleted successfully"));
+// });
 
 // ✅ List Orders
 const listOrders = asyncHandler(async (req, res) => {
@@ -114,7 +194,10 @@ const listOrders = asyncHandler(async (req, res) => {
 // ✅ Get Order Details
 const getOrderDetails = asyncHandler(async (req, res) => {
   const { orderId } = req.params;
-  const order = await Order.findOne({ _id: orderId, tailorId: req.user._id }).lean();
+  const order = await Order.findOne({
+    _id: orderId,
+    tailorId: req.user._id,
+  }).lean();
 
   if (!order) throw new ApiError(404, "Order not found");
 
@@ -127,7 +210,13 @@ const getOrderDetails = asyncHandler(async (req, res) => {
 const updateOrderStatus = asyncHandler(async (req, res) => {
   const { orderId } = req.params;
   const { status } = req.body;
-  const allowedStatuses = ["pending", "in_progress", "qc_check", "completed", "cancelled"];
+  const allowedStatuses = [
+    "pending",
+    "in_progress",
+    "qc_check",
+    "completed",
+    "cancelled",
+  ];
 
   if (!allowedStatuses.includes(status)) {
     throw new ApiError(400, "Invalid status");
@@ -163,24 +252,30 @@ const markRushOrder = asyncHandler(async (req, res) => {
 // ✅ Order Tracking
 const getOrderTracking = asyncHandler(async (req, res) => {
   const { orderId } = req.params;
-  const order = await Order.findOne({ _id: orderId, tailorId: req.user._id }).lean();
+  const order = await Order.findOne({
+    _id: orderId,
+    tailorId: req.user._id,
+  }).lean();
   if (!order) throw new ApiError(404, "Order not found");
 
-  return res.status(200).json(
-    new ApiResponse(
-      200,
-      { lifecycleStatus: order.lifecycleStatus, deliveryCoordination: order.deliveryCoordination },
-      "Order tracking details fetched"
-    )
-  );
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(
+        200,
+        {
+          lifecycleStatus: order.lifecycleStatus,
+          deliveryCoordination: order.deliveryCoordination,
+        },
+        "Order tracking details fetched"
+      )
+    );
 });
 
 export {
-  getProfile,
-  updateProfile,
-  uploadPortfolio,
-  listPortfolio,
-  deletePortfolioFile,
+  // updateUserById,
+  // deleteUserById,
+  // getUserById,
   listOrders,
   getOrderDetails,
   updateOrderStatus,

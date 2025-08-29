@@ -10,10 +10,14 @@ import { ApiResponse } from "../utils/ApiResponse.js";
 import sendSMS from "../utils/sms.js";
 import bcrypt from "bcryptjs/dist/bcrypt.js";
 import mongoose from "mongoose";
+import { Specialty } from "../models/Master.js";
+import { tailorWelcomeEmail } from "../utils/emails/welEmail.js";
+import { sendEmail } from "../utils/emails/sendEmail.js";
+import Customer from "../models/Customer.js";
 
 
 //generate access and refreshtoken
-const generateAccessAndRefereshTokens = async (userId) => {
+const generateAccessAndRefereshTokens = async (userId, roleId) => {
   try {
     console.log("userId passed:", userId, typeof userId);
 
@@ -21,11 +25,24 @@ const generateAccessAndRefereshTokens = async (userId) => {
       throw new Error("Invalid userId passed to generateAccessAndRefereshTokens");
     }
 
-    const user = await User.findById(userId);
+    // Choose model based on role
+    const Model = roleId === 3 ? Customer : User;
+
+    const user = await Model.findById(userId);
     if (!user) throw new Error("User not found");
 
-    const accessToken = user.generateAccessToken();
-    const refreshToken = user.generateRefreshToken();
+    // Use model methods if they exist (for User)
+    const accessToken = user.generateAccessToken?.() || jwt.sign(
+      { _id: user._id, email: user.email },
+      process.env.ACCESS_TOKEN_SECRET,
+      { expiresIn: process.env.ACCESS_TOKEN_EXPIRY }
+    );
+
+    const refreshToken = user.generateRefreshToken?.() || jwt.sign(
+      { _id: user._id, email: user.email },
+      process.env.REFRESH_TOKEN_SECRET,
+      { expiresIn: process.env.REFRESH_TOKEN_EXPIRY }
+    );
 
     user.refreshToken = refreshToken;
     await user.save({ validateBeforeSave: false });
@@ -36,6 +53,7 @@ const generateAccessAndRefereshTokens = async (userId) => {
     throw new Error("Something went wrong while generating refresh and access token");
   }
 };
+
 
 
 
@@ -65,165 +83,322 @@ const checkEmail = asyncHandler(async (req, res) => {
 
 
 //authController.js
+
 const registerUser = asyncHandler(async (req, res) => {
-  console.log("user register Req.body", req.body);
+  try {
+    console.log("User Register Req.body:", req.body);
+    console.log("User Register Req.files:", req.files);
 
-  const {
-    email,
-    user_role,
-    first_name,
-    last_name,
-    country,
-    password,
-    uid,
-    tailorInfo, // tailor-specific payload
-  } = req.body;
+    let {
+      email,
+      user_role,
+      ownerName,
+      businessName,
+      country,
+      password,
+      whatsapp,
+      locations,
+      gender,
+      specialties,
+      experience,
+      description,
+      homeMeasurement,
+      rushOrders,
+      emiratesIdExpiry,
+      socialMedia,
+    } = req.body;
 
-  const userUid = uid || req.user?.uid || "";
+    // -------------------------------
+    // Parse JSON from FormData safely
+    // -------------------------------
+    try {
+      specialties = specialties ? JSON.parse(specialties) : [];
+      locations = locations ? JSON.parse(locations) : [];
+      socialMedia = socialMedia ? JSON.parse(socialMedia) : {};
+    } catch (parseErr) {
+      throw new ApiError(400, "Invalid JSON format in specialties, locations, or socialMedia");
+    }
 
-  // validate required fields
-  const requiredFields = { email, first_name, user_role };
-  const missingFields = Object.keys(requiredFields).filter(
-    (field) => !requiredFields[field] || requiredFields[field] === "undefined"
-  );
-  if (missingFields.length > 0) {
-    return res
-      .status(400)
-      .json(new ApiError(400, `Missing required field: ${missingFields.join(", ")}`));
-  }
+    if (!email || !user_role) throw new ApiError(400, "Email and user_role are required");
 
-  const existedUser = await User.findOne({ email });
-  if (existedUser) {
-    return res
-      .status(400)
-      .json(new ApiError(400, "User with email already exists"));
-  }
+    // -------------------------------
+    // Check if user already exists
+    // -------------------------------
+    const existedUser = await User.findOne({ email });
+    if (existedUser) throw new ApiError(400, "User with this email already exists");
 
-  const userRole = await UserRole.findOne({ role_id: user_role });
-  if (!userRole) {
-    return res.status(400).json(new ApiError(400, "User Role Not found"));
-  }
+    // -------------------------------
+    // Validate user role
+    // -------------------------------
+    const userRole = await UserRole.findOne({ role_id: user_role });
+    if (!userRole) throw new ApiError(400, "Invalid user role");
 
-  let userPayload = {
-    uid: userUid,
-    email,
-    user_role: userRole?._id,
-    first_name,
-    last_name,
-    country,
-    password: password || "",
-    status: userRole?.name === "customer" ? "Approved" : "Pending",
-  };
+    // -------------------------------
+    // Handle file uploads to Cloudinary
+    // -------------------------------
+    const files = req.files || {};
 
-  // tailor role -> save tailorInfo
-  if (user_role === 2) {
-    userPayload.tailorInfo = {
-      ...tailorInfo,
-      submittedAt: new Date(),
-      status: "pending",
+    const uploadFiles = async (fileArray) => {
+      if (!fileArray) return [];
+      const uploadPromises = fileArray.map((file) => uploadOnCloudinary(file.path));
+      const results = await Promise.all(uploadPromises);
+      return results.filter((r) => r).map((r) => r.secure_url);
     };
-  }
 
-  const user = await User.create(userPayload);
+    const [emiratesId, tradeLicense, certificates, portfolioImages] = await Promise.all([
+      uploadFiles(files.emiratesId),
+      uploadFiles(files.tradeLicense),
+      uploadFiles(files.certificates),
+      uploadFiles(files.portfolioImages),
+    ]);
 
-  const createdUser = await User.findById(user._id).select(
-    "-password -refreshToken -user_role -otp -otp_time -uid"
-  );
+    // -------------------------------
+    // Validate specialties
+    // -------------------------------
+    let specialtiesData = [];
+    if (specialties.length > 0) {
+      const validSpecialties = await Specialty.find({ _id: { $in: specialties } });
+      specialtiesData = validSpecialties.map((s) => ({ _id: s._id, name: s.name }));
+    }
 
-  if (!createdUser) {
+    // -------------------------------
+    // Build user payload
+    // -------------------------------
+    let userPayload = {
+      email,
+      user_role: userRole._id,
+      ownerName,
+      businessName,
+      country,
+      password: password || "",
+      status: userRole.name === "customer" ? "Approved" : "Pending",
+    };
+
+    if (user_role == 2) {
+      userPayload.tailorInfo = {
+        businessInfo: { businessName, ownerName, whatsapp, locations },
+        professionalInfo: { gender, specialties: specialtiesData, experience, description },
+        services: { homeMeasurement, rushOrders },
+        documents: { emiratesId, tradeLicense, certificates, portfolioImages },
+        emiratesIdExpiry,
+        additionalInfo: { socialMedia },
+        submittedAt: new Date(),
+        status: "pending",
+      };
+    }
+
+    // Admin-created tailor auto-approve
+    if (req.user?.user_role?.role_id === 1 || req.user?.user_role?.role_id === 6) {
+      userPayload.status = "Approved";
+      if (user_role == 2 && userPayload.tailorInfo) {
+        userPayload.tailorInfo.status = "approved";
+      }
+    }
+
+    // -------------------------------
+    // Save User
+    // -------------------------------
+    const user = await User.create(userPayload);
+
+    const createdUser = await User.findById(user._id).select(
+      "-password -refreshToken -user_role -otp -otp_time"
+    );
+
+    // -------------------------------
+    // Send Welcome Email to Tailors
+    // -------------------------------
+    if (user_role == 2) {
+      try {
+        await sendEmail(
+          email,
+          "Welcome to Tailor Platform – Next Steps",
+          tailorWelcomeEmail(ownerName, businessName)
+        );
+      } catch (mailErr) {
+        console.error("Error sending tailor welcome email:", mailErr);
+      }
+    }
+
     return res
-      .status(500)
-      .json(new ApiError(500, "Something went wrong while registering the user"));
-  }
+      .status(201)
+      .json(new ApiResponse(201, createdUser, "User registered successfully"));
+  } catch (err) {
+    console.error("Error in registerUser:", err);
 
-  return res
-    .status(201)
-    .json(new ApiResponse(200, createdUser, "User registered Successfully"));
+    if (err.name === "ValidationError") return res.status(400).json(new ApiError(400, err.message));
+    if (err.code === 11000) {
+      const dupField = Object.keys(err.keyPattern || {})[0];
+      return res.status(400).json(new ApiError(400, `${dupField} must be unique`));
+    }
+    if (err.name === "CastError") return res.status(400).json(new ApiError(400, `Invalid ${err.path}: ${err.value}`));
+
+    return res
+      .status(err.statusCode || 500)
+      .json(new ApiError(err.statusCode || 500, err.message || "Internal Server Error"));
+  }
 });
 
 
 
+
 // loginUser
+// const loginUser = asyncHandler(async (req, res) => {
+//   try {
+   
+//     const { emailOrPhone, password, provider } = req.body;
+
+//     const requiredFields = {
+//       emailOrPhone,
+//     };
+
+//     const missingFields = Object.keys(requiredFields).filter(
+//       (field) => !requiredFields[field] || requiredFields[field] === "undefined"
+//     );
+
+//     if (missingFields.length > 0) {
+//       return res
+//         .status(400)
+//         .json(
+//           new ApiError(
+//             400,
+//             `Missing required field: ${missingFields.join(", ")}`
+//           )
+//         );
+//     }
+
+//     let user;
+//     if (!provider) {
+//       if (emailOrPhone.includes("@")) {
+//         user = await User.findOne({ email: emailOrPhone }).populate(
+//           "user_role"
+//         );
+        
+//         if (!user)
+//           return res.status(400).json(new ApiError(400, "Email not found!"));
+//       } else {
+//         user = await User.findOne({ phone_number: emailOrPhone }).populate(
+//           "user_role"
+//         );
+       
+//         if (!user)
+//           return res
+//             .status(400)
+//             .json(new ApiError(400, "Phone number not found!"));
+//       }
+
+//       const isPasswordValid = await user.isPasswordCorrect(password);
+
+//       if (!isPasswordValid) {
+//         return res
+//           .status(401)
+//           .json(new ApiError(401, "Invalid user credentials"));
+//       }
+//     } else {
+//       if (emailOrPhone.includes("@")) {
+//         user = await User.findOne({
+//           email: emailOrPhone,
+//         }).populate("user_role");
+       
+//       } else {
+//         user = await User.findOne({
+//           phone_number: emailOrPhone,
+//         }).populate("user_role");
+         
+//       }
+//     }
+
+//     if (
+//       !user ||
+//       !user.user_role ||
+//       user.user_role.role_id !== Number(req.params.role_id)
+//     ) {
+//       return res.status(404).json(new ApiError(404, "User does not exist"));
+//     }
+
+//     const { accessToken, refreshToken } = await generateAccessAndRefereshTokens(
+//       user._id
+//     );
+
+//     const loggedInUser = await User.findById(user._id)
+//       .select("-password -refreshToken -otp -otp_time")
+//       .populate("user_role")
+//       .populate("country")
+//       .populate("city");
+
+//     const options = { httpOnly: true, secure: true };
+
+//     return res
+//       .status(200)
+//       .cookie("accessToken", accessToken, options)
+//       .cookie("refreshToken", refreshToken, options)
+//       .json(
+//         new ApiResponse(
+//           200,
+//           { user: loggedInUser,  accessToken, refreshToken },
+//           "User logged In Successfully"
+//         )
+//       );
+//   } catch (error) {
+//     console.error("Error during login:", error);
+//     return res.status(500).json(new ApiError(500, "Internal Server Error"));
+//   }
+// });
+
+//login for both tailor and customer
+
 const loginUser = asyncHandler(async (req, res) => {
   try {
-   
     const { emailOrPhone, password, provider } = req.body;
+    const requestedRoleId = Number(req.params.role_id);
 
-    const requiredFields = {
-      emailOrPhone,
-    };
-
-    const missingFields = Object.keys(requiredFields).filter(
-      (field) => !requiredFields[field] || requiredFields[field] === "undefined"
-    );
-
-    if (missingFields.length > 0) {
-      return res
-        .status(400)
-        .json(
-          new ApiError(
-            400,
-            `Missing required field: ${missingFields.join(", ")}`
-          )
-        );
+    if (!emailOrPhone) {
+      return res.status(400).json(new ApiError(400, "Missing required field: emailOrPhone"));
     }
+
+    // Choose model based on role
+    const Model = requestedRoleId === 3 ? Customer : User;
 
     let user;
+    const phoneField = requestedRoleId === 3 ? "contactNumber" : "phone_number";
+
     if (!provider) {
+      // Normal login
       if (emailOrPhone.includes("@")) {
-        user = await User.findOne({ email: emailOrPhone }).populate(
-          "user_role"
-        );
-        
-        if (!user)
-          return res.status(400).json(new ApiError(400, "Email not found!"));
+        user = await Model.findOne({ email: emailOrPhone }).populate("user_role");
+        if (!user) return res.status(400).json(new ApiError(400, "Email not found!"));
       } else {
-        user = await User.findOne({ phone_number: emailOrPhone }).populate(
-          "user_role"
-        );
-       
-        if (!user)
-          return res
-            .status(400)
-            .json(new ApiError(400, "Phone number not found!"));
+        user = await Model.findOne({ [phoneField]: emailOrPhone }).populate("user_role");
+        if (!user) return res.status(400).json(new ApiError(400, "Phone number not found!"));
       }
 
+      // Password check
       const isPasswordValid = await user.isPasswordCorrect(password);
-
-      if (!isPasswordValid) {
-        return res
-          .status(401)
-          .json(new ApiError(401, "Invalid user credentials"));
-      }
+      if (!isPasswordValid) return res.status(401).json(new ApiError(401, "Invalid user credentials"));
     } else {
+      // Provider login
       if (emailOrPhone.includes("@")) {
-        user = await User.findOne({
-          email: emailOrPhone,
-        }).populate("user_role");
-       
+        user = await Model.findOne({ email: emailOrPhone }).populate("user_role");
       } else {
-        user = await User.findOne({
-          phone_number: emailOrPhone,
-          uid: req.user?.uid,
-        }).populate("user_role");
-         
+        user = await Model.findOne({ [phoneField]: emailOrPhone }).populate("user_role");
       }
     }
 
-    if (
-      !user ||
-      !user.user_role ||
-      user.user_role.role_id !== Number(req.params.role_id)
-    ) {
+    // Validate role: allow role_id 1 (admin) to log in as any role
+    if (!user || !user.user_role) {
       return res.status(404).json(new ApiError(404, "User does not exist"));
     }
 
-    const { accessToken, refreshToken } = await generateAccessAndRefereshTokens(
-      user._id
-    );
+    const actualRoleId = user.user_role.role_id;
+    if (actualRoleId !== 1 && actualRoleId !== requestedRoleId) {
+      return res.status(404).json(new ApiError(404, "User does not exist or role mismatch"));
+    }
 
-    const loggedInUser = await User.findById(user._id)
-      .select("-password -refreshToken -otp -otp_time -uid")
+    // Generate tokens
+    const { accessToken, refreshToken } = await generateAccessAndRefereshTokens(user._id, actualRoleId);
+
+    // Remove sensitive info
+    const loggedInUser = await Model.findById(user._id)
+      .select("-password -refreshToken -otp -otp_time")
       .populate("user_role")
       .populate("country")
       .populate("city");
@@ -235,17 +410,14 @@ const loginUser = asyncHandler(async (req, res) => {
       .cookie("accessToken", accessToken, options)
       .cookie("refreshToken", refreshToken, options)
       .json(
-        new ApiResponse(
-          200,
-          { user: loggedInUser,  accessToken, refreshToken },
-          "User logged In Successfully"
-        )
+        new ApiResponse(200, { user: loggedInUser, accessToken, refreshToken }, "User logged in successfully")
       );
   } catch (error) {
     console.error("Error during login:", error);
     return res.status(500).json(new ApiError(500, "Internal Server Error"));
   }
 });
+
 
 
 //logoutuser
@@ -277,57 +449,43 @@ const logoutUser = asyncHandler(async (req, res) => {
 
 //refreshaccesstoken
 const refreshAccessToken = asyncHandler(async (req, res) => {
-  const incomingRefreshToken =
-    req.cookies.refreshToken || req.body.refreshToken;
+  const incomingRefreshToken = req.cookies.refreshToken || req.body.refreshToken;
 
   if (!incomingRefreshToken) {
     return res.status(420).json(new ApiError(420, "Unauthorized request"));
   }
 
   try {
-    const decodedToken = jwt.verify(
-      incomingRefreshToken,
-      process.env.REFRESH_TOKEN_SECRET
-    );
+    const decodedToken = jwt.verify(incomingRefreshToken, process.env.REFRESH_TOKEN_SECRET);
 
-    const user = await User.findById(decodedToken?._id);
+    // Determine roleId from token or from request if you store it in token
+    const roleId = decodedToken?.roleId || 1; // fallback to 1 (User) if not present
+    const Model = roleId === 3 ? Customer : User;
+
+    const user = await Model.findById(decodedToken?._id);
 
     if (!user) {
       return res.status(420).json(new ApiError(420, "Invalid refresh token"));
     }
 
     if (incomingRefreshToken !== user?.refreshToken) {
-      return res
-        .status(420)
-        .json(new ApiError(420, "Refresh token is expired or used"));
+      return res.status(420).json(new ApiError(420, "Refresh token is expired or used"));
     }
 
-    const options = {
-      httpOnly: true,
-      secure: true,
-    };
+    const options = { httpOnly: true, secure: true };
 
-    const { accessToken, refreshToken } = await generateAccessAndRefereshTokens(
-      user._id
-    );
+    const { accessToken, refreshToken } = await generateAccessAndRefereshTokens(user._id, roleId);
 
     return res
       .status(200)
       .cookie("accessToken", accessToken, options)
       .cookie("refreshToken", refreshToken, options)
-      .json(
-        new ApiResponse(
-          200,
-          { accessToken, refreshToken },
-          "Access token refreshed"
-        )
-      );
+      .json(new ApiResponse(200, { accessToken, refreshToken }, "Access token refreshed"));
   } catch (error) {
-    return res
-      .status(420)
-      .json(new ApiError(420, error?.message || "Invalid refresh token"));
+    return res.status(420).json(new ApiError(420, error?.message || "Invalid refresh token"));
   }
 });
+
 
 
 //changecurrentpassword
@@ -435,7 +593,7 @@ const updateAccountDetails = asyncHandler(async (req, res) => {
       },
     },
     { new: true }
-  ).select("-password -refreshToken -user_role -otp -otp_time -uid");
+  ).select("-password -refreshToken -user_role -otp -otp_time");
 
   return res
     .status(200)
@@ -480,7 +638,7 @@ const updateCoverImage = asyncHandler(async (req, res) => {
       },
     },
     { new: true }
-  ).select("-password -refreshToken -user_role -otp -otp_time -uid");
+  ).select("-password -refreshToken -user_role -otp -otp_time");
 
   return res
     .status(200)

@@ -1,36 +1,377 @@
-import TailorProfile from '../models/TailorProfile.js';
-import Order from '../models/Order.js';
-import Measurement from '../models/Measurement.js';
-import Review from '../models/Review.js';
-import logger from '../utils/logger.js';
-import crypto from 'crypto';
-import mongoose from 'mongoose';
+import TailorProfile from "../models/TailorProfile.js";
+import Order from "../models/Order.js";
+import Review from "../models/Review.js";
+import logger from "../utils/logger.js";
+import crypto from "crypto";
+import mongoose from "mongoose";
+import Customer from "../models/Customer.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
+import { ApiError } from "../utils/ApiError.js";
+import { deleteFromCloudinary, uploadOnCloudinary } from "../cloudinary.js";
+import { ApiResponse } from "../utils/ApiResponse.js";
+import { UserRole } from "../models/userRole.js";
 
 
-// =========================
-// Utility: Measurement Encryption
-// =========================
-const algorithm = 'aes-256-cbc';
-const key = crypto.createHash('sha256')
-  .update(String(process.env.MEASUREMENT_ENCRYPT_KEY || 'defaultkey'))
-  .digest('base64')
-  .substr(0, 32);
+const loginCustomer = asyncHandler(async (req, res) => {
+  try {
+   
+    const { emailOrPhone, password, provider } = req.body;
 
-const encryptField = (data) => {
-  const ivBuf = crypto.randomBytes(16);
-  const cipher = crypto.createCipheriv(algorithm, key, ivBuf);
-  let encrypted = cipher.update(JSON.stringify(data), 'utf8', 'hex');
-  encrypted += cipher.final('hex');
-  return { iv: ivBuf.toString('hex'), content: encrypted };
-};
+    const requiredFields = {
+      emailOrPhone,
+    };
 
-const decryptField = (encrypted) => {
-  const ivBuf = Buffer.from(encrypted.iv, 'hex');
-  const decipher = crypto.createDecipheriv(algorithm, key, ivBuf);
-  let decrypted = decipher.update(encrypted.content, 'hex', 'utf8');
-  decrypted += decipher.final('utf8');
-  return JSON.parse(decrypted);
-};
+    const missingFields = Object.keys(requiredFields).filter(
+      (field) => !requiredFields[field] || requiredFields[field] === "undefined"
+    );
+
+    if (missingFields.length > 0) {
+      return res
+        .status(400)
+        .json(
+          new ApiError(
+            400,
+            `Missing required field: ${missingFields.join(", ")}`
+          )
+        );
+    }
+
+    let user;
+    if (!provider) {
+      if (emailOrPhone.includes("@")) {
+        user = await Customer.findOne({ email: emailOrPhone }).populate(
+          "user_role"
+        );
+        
+        if (!user)
+          return res.status(400).json(new ApiError(400, "Email not found!"));
+      } else {
+        user = await Customer.findOne({ phone_number: emailOrPhone }).populate(
+          "user_role"
+        );
+       
+        if (!user)
+          return res
+            .status(400)
+            .json(new ApiError(400, "Phone number not found!"));
+      }
+
+      const isPasswordValid = await user.isPasswordCorrect(password);
+
+      if (!isPasswordValid) {
+        return res
+          .status(401)
+          .json(new ApiError(401, "Invalid user credentials"));
+      }
+    } else {
+      if (emailOrPhone.includes("@")) {
+        user = await Customer.findOne({
+          email: emailOrPhone,
+        }).populate("user_role");
+       
+      } else {
+        user = await Customer.findOne({
+          phone_number: emailOrPhone,
+        }).populate("user_role");
+         
+      }
+    }
+
+    if (
+      !user ||
+      !user.user_role ||
+      user.user_role.role_id !== Number(req.params.role_id)
+    ) {
+      return res.status(404).json(new ApiError(404, "User does not exist"));
+    }
+
+    const { accessToken, refreshToken } = await generateAccessAndRefereshTokens(
+      user._id
+    );
+
+    const loggedInUser = await Customer.findById(user._id)
+      .select("-password -refreshToken -otp -otp_time")
+      .populate("user_role")
+      .populate("country")
+      .populate("city");
+
+    const options = { httpOnly: true, secure: true };
+
+    return res
+      .status(200)
+      .cookie("accessToken", accessToken, options)
+      .cookie("refreshToken", refreshToken, options)
+      .json(
+        new ApiResponse(
+          200,
+          { user: loggedInUser,  accessToken, refreshToken },
+          "User logged In Successfully"
+        )
+      );
+  } catch (error) {
+    console.error("Error during login:", error);
+    return res.status(500).json(new ApiError(500, "Internal Server Error"));
+  }
+});
+
+//register customer
+const registerCustomer = asyncHandler(async (req, res) => {
+  let {
+    name,
+    contactNumber,
+    email,
+    password,
+    dob,
+    address,
+    city,
+    gender,
+    age,
+  } = req.body;
+
+  // ✅ Validate required fields
+  if (!name || !contactNumber || !email) {
+    throw new ApiError(400, "Name, contactNumber, and email are required");
+  }
+
+  // ✅ Check if email already exists
+  const existed = await Customer.findOne({ email });
+  if (existed) {
+    throw new ApiError(400, "Customer with this email already exists");
+  }
+
+  // ✅ Find user role with role_id = 3
+  const userRole = await UserRole.findOne({ role_id: 3 });
+  if (!userRole) {
+    throw new ApiError(400, "Customer role not found in UserRole collection");
+  }
+
+  // ✅ Handle profile picture upload
+  let profilePictureUrl = null;
+  if (req.files?.profilePicture) {
+    const upload = await uploadOnCloudinary(req.files.profilePicture[0].path);
+    profilePictureUrl = upload?.secure_url;
+  }
+
+  // ✅ Handle multiple Emirates ID proof images
+  let emiratesIdProofUrls = [];
+  if (req.files?.emiratesIdProof && req.files.emiratesIdProof.length > 0) {
+    const uploads = await Promise.all(
+      req.files.emiratesIdProof.map(async (file) => {
+        const result = await uploadOnCloudinary(file.path);
+        return result?.secure_url;
+      })
+    );
+    emiratesIdProofUrls = uploads.filter((url) => url !== null);
+  }
+
+  // ✅ Create customer
+  const customer = await Customer.create({
+    user_role: userRole._id, // store ObjectId
+    name,
+    contactNumber,
+    email,
+    password: password || "",
+    dob,
+    address,
+    city,
+    gender,
+    age,
+    profilePicture: profilePictureUrl,
+    emiratesIdProof: emiratesIdProofUrls,
+    status: "Approved", // default
+  });
+
+  return res
+    .status(201)
+    .json(new ApiResponse(201, customer, "Customer registered successfully"));
+});
+
+//update customer
+const updateCustomer = asyncHandler(async (req, res) => {
+  const { customerId } = req.params;
+
+  if (!mongoose.Types.ObjectId.isValid(customerId)) {
+    return res
+      .status(400)
+      .json(new ApiResponse(400, null, "Invalid customerId"));
+  }
+
+  let customer = await Customer.findById(customerId);
+  if (!customer)
+    return res
+      .status(404)
+      .json(new ApiResponse(404, null, "Customer not found"));
+
+  const {
+    name,
+    contactNumber,
+    email,
+    dob,
+    address,
+    city,
+    gender,
+    age,
+    status, // only admin can change status
+  } = req.body;
+
+  if (name) customer.name = name;
+  if (contactNumber) customer.contactNumber = contactNumber;
+  if (email) customer.email = email;
+  if (dob) customer.dob = dob;
+  if (address) customer.address = address;
+  if (city) customer.city = city;
+  if (gender) customer.gender = gender;
+  if (age) customer.age = age;
+
+  if (status && req.user?.user_role?.role_id === 1) {
+    // only admin
+    customer.status = status; // "Deactivated" or "Approved"
+  }
+
+  // Handle profile picture update
+  if (req.files?.profilePicture) {
+    if (customer.profilePicture)
+      await deleteFromCloudinary([customer.profilePicture]);
+    const upload = await uploadOnCloudinary(req.files.profilePicture[0].path);
+    customer.profilePicture = upload?.secure_url;
+  }
+
+  await customer.save();
+  return res
+    .status(200)
+    .json(new ApiResponse(200, customer, "Customer updated successfully"));
+});
+
+// ---------------- Delete Customer ----------------
+const deleteCustomer = asyncHandler(async (req, res) => {
+  const { customerId } = req.params;
+
+  if (!mongoose.Types.ObjectId.isValid(customerId)) {
+    return res
+      .status(400)
+      .json(new ApiResponse(400, null, "Invalid customerId"));
+  }
+
+  const customer = await Customer.findById(customerId);
+  if (!customer)
+    return res
+      .status(404)
+      .json(new ApiResponse(404, null, "Customer not found"));
+
+  // Delete profile picture & documents from Cloudinary
+  if (customer.profilePicture)
+    await deleteFromCloudinary([customer.profilePicture]);
+  if (customer.emiratesId) await deleteFromCloudinary([customer.emiratesId]);
+
+  await Customer.deleteOne({ _id: customerId });
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, null, "Customer deleted successfully"));
+});
+
+const updateCustomerMeasurements = asyncHandler(async (req, res) => {
+  const { customerId } = req.params;
+
+  if (!mongoose.Types.ObjectId.isValid(customerId)) {
+    return res
+      .status(400)
+      .json(new ApiResponse(400, null, "Invalid customerId"));
+  }
+
+  const customer = await Customer.findById(customerId);
+  if (!customer)
+    return res
+      .status(404)
+      .json(new ApiResponse(404, null, "Customer not found"));
+
+  const measurements = req.body; // { height, weight, chest, waist, hips, ... }
+
+  customer.measurements = {
+    ...customer.measurements?.toObject(),
+    ...measurements,
+  };
+
+  await customer.save();
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(
+        200,
+        customer.measurements,
+        "Measurements updated successfully"
+      )
+    );
+});
+
+
+// Get logged-in customer profile
+const getLoggedInCustomer = asyncHandler(async (req, res) => {
+  try {
+    const customerId = req.user._id;
+
+    if (!mongoose.Types.ObjectId.isValid(customerId)) {
+      return res
+        .status(400)
+        .json(new ApiResponse(400, null, "Invalid customerId"));
+    }
+
+    const customer = await Customer.findById(customerId)
+      .select("-password -refreshToken -otp -otp_time")
+      .populate("user_role")
+      .populate("city");
+
+    if (!customer) {
+      return res
+        .status(404)
+        .json(new ApiResponse(404, null, "Customer not found"));
+    }
+
+    return res
+      .status(200)
+      .json(new ApiResponse(200, customer, "Customer profile fetched successfully"));
+  } catch (error) {
+    console.error("Error fetching logged-in customer:", error);
+    return res
+      .status(500)
+      .json(new ApiResponse(500, null, "Internal server error"));
+  }
+});
+
+// Get customer profile by query id
+const getCustomerById = asyncHandler(async (req, res) => {
+  try {
+    const { customerId } = req.params;
+
+    if (!customerId || !mongoose.Types.ObjectId.isValid(customerId)) {
+      return res
+        .status(400)
+        .json(new ApiResponse(400, null, "Invalid or missing customerId in query"));
+    }
+
+    const customer = await Customer.findById(customerId)
+      .select("-password -refreshToken -otp -otp_time")
+      .populate("user_role")
+      .populate("city");
+
+    if (!customer) {
+      return res
+        .status(404)
+        .json(new ApiResponse(404, null, "Customer not found"));
+    }
+
+    return res
+      .status(200)
+      .json(new ApiResponse(200, customer, "Customer profile fetched successfully"));
+  } catch (error) {
+    console.error("Error fetching customer:", error);
+    return res
+      .status(500)
+      .json(new ApiResponse(500, null, "Internal server error"));
+  }
+});
+
+
 
 // =========================
 // Tailor Discovery & Recommendations
@@ -39,14 +380,19 @@ const searchTailors = async (req, res, next) => {
   try {
     const { location, preferences } = req.body;
     const tailors = await TailorProfile.find({
-      'gpsAddress.coordinates': {
+      "gpsAddress.coordinates": {
         $nearSphere: {
-          $geometry: { type: 'Point', coordinates: [location.longitude, location.latitude] },
+          $geometry: {
+            type: "Point",
+            coordinates: [location.longitude, location.latitude],
+          },
           $maxDistance: 50000,
         },
       },
       specializations: { $in: preferences.specializations || [] },
-    }).limit(20).lean();
+    })
+      .limit(20)
+      .lean();
 
     res.json({ results: tailors });
   } catch (error) {
@@ -59,13 +405,13 @@ const getRecommendations = async (req, res, next) => {
     const topTailors = await TailorProfile.aggregate([
       {
         $lookup: {
-          from: 'reviews',
-          localField: 'userId',
-          foreignField: 'tailorId',
-          as: 'reviews',
+          from: "reviews",
+          localField: "userId",
+          foreignField: "tailorId",
+          as: "reviews",
         },
       },
-      { $addFields: { avgReview: { $avg: '$reviews.qualityRating' } } },
+      { $addFields: { avgReview: { $avg: "$reviews.qualityRating" } } },
       { $sort: { avgReview: -1 } },
       { $limit: 10 },
     ]);
@@ -76,7 +422,7 @@ const getRecommendations = async (req, res, next) => {
 };
 
 const getEventsCalendar = async (req, res, next) => {
-  res.json({ message: 'Events calendar - to be implemented' });
+  res.json({ message: "Events calendar - to be implemented" });
 };
 
 // =========================
@@ -84,14 +430,24 @@ const getEventsCalendar = async (req, res, next) => {
 // =========================
 const placeOrder = async (req, res, next) => {
   try {
-    const { tailorId, orderDetails, measurements, paymentMethod, customizations, deliveryAddress } = req.body;
+    const {
+      tailorId,
+      orderDetails,
+      measurements,
+      paymentMethod,
+      customizations,
+      deliveryAddress,
+    } = req.body;
 
     const order = new Order({
       customerId: req.user._id,
       tailorId,
-      intakeChannel: 'mobile_app',
+      intakeChannel: "mobile_app",
       classification: orderDetails.classification,
-      lifecycleStatus: { current: 'pending', timestamps: { pending: new Date() } },
+      lifecycleStatus: {
+        current: "pending",
+        timestamps: { pending: new Date() },
+      },
       orderDetails,
       measurements,
       customizations,
@@ -100,7 +456,9 @@ const placeOrder = async (req, res, next) => {
     });
 
     await order.save();
-    res.status(201).json({ message: 'Order placed successfully', orderId: order._id });
+    res
+      .status(201)
+      .json({ message: "Order placed successfully", orderId: order._id });
   } catch (error) {
     next(error);
   }
@@ -110,12 +468,18 @@ const getOrderTracking = async (req, res, next) => {
   try {
     const { orderId } = req.params;
     if (!mongoose.Types.ObjectId.isValid(orderId)) {
-      return res.status(400).json({ message: 'Invalid orderId' });
+      return res.status(400).json({ message: "Invalid orderId" });
     }
-    const order = await Order.findOne({ _id: orderId, customerId: req.user._id }).lean();
-    if (!order) return res.status(404).json({ message: 'Order not found' });
+    const order = await Order.findOne({
+      _id: orderId,
+      customerId: req.user._id,
+    }).lean();
+    if (!order) return res.status(404).json({ message: "Order not found" });
 
-    res.json({ lifecycleStatus: order.lifecycleStatus, photos: order.progressPhotos || [] });
+    res.json({
+      lifecycleStatus: order.lifecycleStatus,
+      photos: order.progressPhotos || [],
+    });
   } catch (error) {
     next(error);
   }
@@ -123,7 +487,9 @@ const getOrderTracking = async (req, res, next) => {
 
 const getOrderHistory = async (req, res, next) => {
   try {
-    const orders = await Order.find({ customerId: req.user._id }).sort({ createdAt: -1 }).lean();
+    const orders = await Order.find({ customerId: req.user._id })
+      .sort({ createdAt: -1 })
+      .lean();
     res.json(orders);
   } catch (error) {
     next(error);
@@ -131,14 +497,17 @@ const getOrderHistory = async (req, res, next) => {
 };
 
 const makePayment = async (req, res, next) => {
-  res.json({ message: 'Payment processing - to be implemented' });
+  res.json({ message: "Payment processing - to be implemented" });
 };
 
 const getOrderStatus = async (req, res, next) => {
   try {
     const { orderId } = req.params;
-    const order = await Order.findOne({ _id: orderId, customerId: req.user._id }).lean();
-    if (!order) return res.status(404).json({ message: 'Order not found' });
+    const order = await Order.findOne({
+      _id: orderId,
+      customerId: req.user._id,
+    }).lean();
+    if (!order) return res.status(404).json({ message: "Order not found" });
 
     res.json({ status: order.lifecycleStatus.current });
   } catch (error) {
@@ -149,10 +518,14 @@ const getOrderStatus = async (req, res, next) => {
 const uploadProgressPhoto = async (req, res, next) => {
   try {
     const { orderId } = req.params;
-    if (!req.file) return res.status(400).json({ message: 'No photo uploaded' });
+    if (!req.file)
+      return res.status(400).json({ message: "No photo uploaded" });
 
-    const order = await Order.findOne({ _id: orderId, customerId: req.user._id });
-    if (!order) return res.status(404).json({ message: 'Order not found' });
+    const order = await Order.findOne({
+      _id: orderId,
+      customerId: req.user._id,
+    });
+    if (!order) return res.status(404).json({ message: "Order not found" });
 
     order.progressPhotos = order.progressPhotos || [];
     order.progressPhotos.push({
@@ -163,7 +536,12 @@ const uploadProgressPhoto = async (req, res, next) => {
     });
     await order.save();
 
-    res.status(201).json({ message: 'Progress photo uploaded', progressPhotos: order.progressPhotos });
+    res
+      .status(201)
+      .json({
+        message: "Progress photo uploaded",
+        progressPhotos: order.progressPhotos,
+      });
   } catch (error) {
     next(error);
   }
@@ -193,94 +571,24 @@ const updateProfile = async (req, res, next) => {
     const user = req.user;
 
     if (contact) user.contact = contact;
-    if (notificationPreferences) user.notificationPreferences = notificationPreferences;
+    if (notificationPreferences)
+      user.notificationPreferences = notificationPreferences;
 
     await user.save();
-    res.json({ message: 'Profile updated successfully' });
+    res.json({ message: "Profile updated successfully" });
   } catch (error) {
     next(error);
   }
 };
 
-// =========================
-// Measurements
-// =========================
-const createMeasurement = async (req, res, next) => {
-  try {
-    const { measurements, templateId, tailorId, familyProfileId } = req.body;
-    const encryptedMeasurements = encryptField(measurements);
-
-    const newMeasurement = await new Measurement({
-      customerId: req.user._id,
-      encryptedMeasurements,
-      templateId,
-      tailorVerifications: [tailorId].filter(Boolean),
-      familyProfile: familyProfileId || null,
-      accessControl: { allowedTailors: tailorId ? [tailorId] : [] },
-      versionHistory: [{ measurements: encryptedMeasurements, updatedAt: new Date() }],
-      createdAt: new Date(),
-    }).save();
-
-    res.status(201).json({ message: 'Measurement stored securely', measurementId: newMeasurement._id });
-  } catch (error) {
-    next(error);
-  }
-};
-
-const listMeasurements = async (req, res, next) => {
-  try {
-    const measurements = await Measurement.find({ customerId: req.user._id }).lean();
-    const decryptedMeasurements = measurements.map((m) => ({
-      _id: m._id,
-      measurements: decryptField(m.encryptedMeasurements),
-      templateId: m.templateId,
-      createdAt: m.createdAt,
-      updatedAt: m.updatedAt,
-    }));
-    res.json(decryptedMeasurements);
-  } catch (error) {
-    next(error);
-  }
-};
-
-const updateMeasurement = async (req, res, next) => {
-  try {
-    const { measurementId } = req.params;
-    const { measurements } = req.body;
-    const measurement = await Measurement.findOne({ _id: measurementId, customerId: req.user._id });
-    if (!measurement) return res.status(404).json({ message: 'Measurement not found' });
-
-    const encryptedMeasurements = encryptField(measurements);
-    measurement.encryptedMeasurements = encryptedMeasurements;
-    measurement.versionHistory.push({ measurements: encryptedMeasurements, updatedAt: new Date() });
-    measurement.updatedAt = new Date();
-    await measurement.save();
-
-    res.json({ message: 'Measurement updated successfully' });
-  } catch (error) {
-    next(error);
-  }
-};
-
-const deleteMeasurement = async (req, res, next) => {
-  try {
-    const { measurementId } = req.params;
-    await Measurement.deleteOne({ _id: measurementId, customerId: req.user._id });
-    res.json({ message: 'Measurement deleted' });
-  } catch (error) {
-    next(error);
-  }
-};
-
-// =========================
-// Family Profiles
-// =========================
 const listFamilyProfiles = async (req, res, next) => {
   res.json([]); // placeholder
 };
 
 const createFamilyProfile = async (req, res, next) => {
-  res.status(201).json({ message: 'Create family profile - to be implemented' });
+  res
+    .status(201)
+    .json({ message: "Create family profile - to be implemented" });
 };
 
 // =========================
@@ -288,7 +596,8 @@ const createFamilyProfile = async (req, res, next) => {
 // =========================
 const submitReview = async (req, res, next) => {
   try {
-    const { tailorId, ratings, reviewText, photos, isVerifiedPurchase } = req.body;
+    const { tailorId, ratings, reviewText, photos, isVerifiedPurchase } =
+      req.body;
 
     const review = await new Review({
       customerId: req.user._id,
@@ -297,11 +606,16 @@ const submitReview = async (req, res, next) => {
       reviewText,
       photos: photos || [],
       isVerifiedPurchase: !!isVerifiedPurchase,
-      moderationStatus: 'pending',
+      moderationStatus: "pending",
       createdAt: new Date(),
     }).save();
 
-    res.status(201).json({ message: 'Review submitted and pending moderation', reviewId: review._id });
+    res
+      .status(201)
+      .json({
+        message: "Review submitted and pending moderation",
+        reviewId: review._id,
+      });
   } catch (error) {
     next(error);
   }
@@ -310,7 +624,10 @@ const submitReview = async (req, res, next) => {
 const listReviews = async (req, res, next) => {
   try {
     const { tailorId } = req.params;
-    const reviews = await Review.find({ tailorId, moderationStatus: 'approved' }).lean();
+    const reviews = await Review.find({
+      tailorId,
+      moderationStatus: "approved",
+    }).lean();
     res.json(reviews);
   } catch (error) {
     next(error);
@@ -322,13 +639,17 @@ const reportReview = async (req, res, next) => {
     const { reviewId } = req.params;
     const { reason } = req.body;
     const review = await Review.findById(reviewId);
-    if (!review) return res.status(404).json({ message: 'Review not found' });
+    if (!review) return res.status(404).json({ message: "Review not found" });
 
     review.communityReports = review.communityReports || [];
-    review.communityReports.push({ userId: req.user._id, reason, reportedAt: new Date() });
+    review.communityReports.push({
+      userId: req.user._id,
+      reason,
+      reportedAt: new Date(),
+    });
     await review.save();
 
-    res.json({ message: 'Review reported for moderation' });
+    res.json({ message: "Review reported for moderation" });
   } catch (error) {
     next(error);
   }
@@ -338,21 +659,27 @@ const reportReview = async (req, res, next) => {
 // Referrals & Social
 // =========================
 const getReferralStatus = async (req, res, next) => {
-  res.json({ message: 'Referral status - to be implemented' });
+  res.json({ message: "Referral status - to be implemented" });
 };
 
 const sendReferralInvite = async (req, res, next) => {
-  res.json({ message: 'Send referral invite - to be implemented' });
+  res.json({ message: "Send referral invite - to be implemented" });
 };
 
 const shareOnSocialMedia = async (req, res, next) => {
-  res.json({ message: 'Social media sharing - to be implemented' });
+  res.json({ message: "Social media sharing - to be implemented" });
 };
 
 // =========================
 // Exports
 // =========================
 export {
+  getCustomerById,
+  getLoggedInCustomer,
+  registerCustomer,
+  updateCustomer,
+  deleteCustomer,
+  updateCustomerMeasurements,
   searchTailors,
   getRecommendations,
   getEventsCalendar,
@@ -364,10 +691,6 @@ export {
   uploadProgressPhoto,
   getProfile,
   updateProfile,
-  createMeasurement,
-  listMeasurements,
-  updateMeasurement,
-  deleteMeasurement,
   listFamilyProfiles,
   createFamilyProfile,
   submitReview,

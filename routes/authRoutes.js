@@ -20,7 +20,7 @@ import multer from "../middleware/multer.middleware.js";
 const router = Router()
 
 router.route("/check-email").post(checkEmail)
-router.route("/register").post(authenticateToken, registerUser)
+router.post("/register",multer.uploadUserFiles(),registerUser);
 router.route("/login/:role_id").post(authenticateToken, loginUser)
 
 router.route("/generate-otp").post(generateOTP)

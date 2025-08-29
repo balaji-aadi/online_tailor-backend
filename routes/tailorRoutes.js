@@ -8,22 +8,17 @@ import {
   validateFinancialData,
 } from "../validators/tailorValidators.js";
 import { verifyJWT } from "../middleware/authMiddleware.js";
+import { deleteUserById, getUserById, updateUserById } from "../controllers/user.controller.js";
 
 const router = express.Router();
 
 router.use(verifyJWT);
 
-/** ---------------- BUSINESS PROFILE MANAGEMENT ---------------- */
-router.get("/profile", tailorController.getProfile);
-router.put("/profile", validateProfileUpdate, tailorController.updateProfile);
 
-router.post("/portfolio/upload",multer.uploadSingle("progressPhoto"),tailorController.uploadPortfolio);
-router.get("/portfolio", tailorController.listPortfolio);
-router.delete("/portfolio/:fileId", tailorController.deletePortfolioFile);
+// router.get("/get-tailor-profile/:userId", getUserById);
+// router.put("/update-tailor-profile/:userId", multer.uploadUserFiles(), validateProfileUpdate, updateUserById);
+// router.delete("/delete-tailor-profile/:userId", deleteUserById);
 
-// Removed: add/remove specializations (handlers not implemented)
-
-// Removed: certifications routes (handlers not implemented)
 
 /** ---------------- ORDER MANAGEMENT ---------------- */
 router.get("/orders", tailorController.listOrders);

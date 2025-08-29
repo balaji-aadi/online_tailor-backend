@@ -1,4 +1,5 @@
 import Dispute from '../models/Dispute.js';
+import nodemailer from 'nodemailer';
 import * as analyticsService from '../services/analyticsService.js';
 import * as notificationService from '../services/notificationService.js';
 import csv from 'csvtojson';
@@ -9,6 +10,105 @@ import fs from 'fs';
 import mongoose from 'mongoose';
 import  User  from '../models/User.js';
 import Notification from '../models/Notification.js';
+import { asyncHandler } from '../utils/asyncHandler.js';
+import { ApiResponse } from '../utils/ApiResponse.js';
+import { UserRole } from '../models/userRole.js';
+import { sendEmail } from '../utils/emails/sendEmail.js';
+
+
+// List users with optional role filter, search, pagination
+const getAllUsers = asyncHandler(async (req, res) => {
+  const {
+    role,
+    status,
+    gender,
+    city,
+    search = "",
+    page = "1",
+    limit = "20",
+    sort = "desc",
+  } = req.query;
+
+  const pageNum = Math.max(parseInt(page, 10) || 1, 1);
+  const limitNum = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 100);
+
+  // Fetch roles once
+  const [adminRole, tailorRole, customerRole] = await Promise.all([
+    UserRole.findOne({ role_id: 1 }),
+    UserRole.findOne({ role_id: 2 }),
+    UserRole.findOne({ role_id: 3 }),
+  ]);
+
+  // Ensure ObjectId
+const adminRoleId = adminRole?._id ? new mongoose.Types.ObjectId(adminRole._id) : null;
+const tailorRoleId = tailorRole?._id ? new mongoose.Types.ObjectId(tailorRole._id) : null;
+const customerRoleId = customerRole?._id ? new mongoose.Types.ObjectId(customerRole._id) : null;
+
+if (city) query.city = new mongoose.Types.ObjectId(city);
+
+  // Build query
+  const query = {};
+  if (adminRoleId) query.user_role = { $ne: adminRoleId };
+  if (role === "tailor" && tailorRoleId) query.user_role = tailorRoleId;
+  if (role === "customer" && customerRoleId) query.user_role = customerRoleId;
+  if (status && ["pending", "approved", "rejected"].includes(status.toLowerCase()))
+    query["tailorInfo.status"] = status.toLowerCase();
+  if (gender && ["male", "female", "others"].includes(gender.toLowerCase()))
+    query["tailorInfo.professionalInfo.gender"] = gender.toLowerCase();
+  if (city) query.city = mongoose.Types.ObjectId(city);
+  if (search) {
+    const regex = new RegExp(search, "i");
+    query.$or = [
+      { email: regex },
+      { first_name: regex },
+      { last_name: regex },
+      { ownerName: regex },
+      { businessName: regex },
+      { phone_number: regex },
+    ];
+  }
+
+  // Fetch users
+  const users = await User.find(query)
+    .populate("user_role country city")
+    .select("-otp -otp_time -password -refreshToken")
+    .populate("tailorInfo.professionalInfo.specialties")
+    .sort({ _id: sort === "asc" ? 1 : -1 })
+    .skip((pageNum - 1) * limitNum)
+    .limit(limitNum);
+
+  // Fetch counts
+  const totalUsers = await User.countDocuments({ user_role: { $ne: adminRoleId } });
+  const totalTailors = await User.countDocuments({ user_role: tailorRoleId });
+  const totalCustomers = await User.countDocuments({ user_role: customerRoleId });
+  const pendingTailors = await User.countDocuments({
+    user_role: tailorRoleId,
+    "tailorInfo.status": "pending",
+  });
+  const approvedTailors = await User.countDocuments({
+    user_role: tailorRoleId,
+    "tailorInfo.status": "approved",
+  });
+  const rejectedTailors = await User.countDocuments({
+    user_role: tailorRoleId,
+    "tailorInfo.status": "rejected",
+  });
+
+  res.status(200).json(
+    new ApiResponse(200, users, `${role ? role : "Users"} fetched successfully`, {
+      page: pageNum,
+      limit: limitNum,
+      totalPages: Math.ceil(totalUsers / limitNum),
+      totalUsers,
+      totalTailors,
+      totalCustomers,
+      pendingTailors,
+      approvedTailors,
+      rejectedTailors,
+    })
+  );
+});
+
 
 
 
@@ -384,13 +484,148 @@ const getDisputeDetails = async (req, res, next) => {
 //     await Content.findByIdAndDelete(contentId);
 //     res.json({ message: 'Content deleted' });
 //   } catch (error) {
-//     next(error);
+//     next(error); 
 //   }
 // };
+
+
+const verifyTailorAccount = async (req, res, next) => {
+  try {
+    const { 
+      userId, 
+      action = "approve", 
+      generateTempPassword = false, 
+      reason = ""   // ✅ Unified field for both reject & activate
+    } = req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ message: "Invalid userId" });
+    }
+
+    const user = await User.findById(userId).populate("user_role");
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    if (!user.user_role || !(user.user_role.role_id === 2 || /tailor/i.test(user.user_role.name || ""))) {
+      return res.status(400).json({ message: "User is not a tailor" });
+    }
+
+    if (!user.email) {
+      return res.status(400).json({ message: "User does not have a valid email" });
+    }
+
+    user.tailorInfo = user.tailorInfo || {};
+    let tempPassword = null;
+    let emailSubject = "";
+    let emailHtml = "";
+
+    switch (action) {
+      case "approve":
+        if (user.tailorInfo.status !== "pending") {
+          return res.status(400).json({ message: "Cannot approve a non-pending tailor" });
+        }
+        user.tailorInfo.status = "approved";
+        user.status = "Approved";
+
+        if (generateTempPassword || !user.password) {
+          tempPassword = Math.random().toString(36).slice(-10) + "A1!";
+          user.password = tempPassword;
+        }
+
+        emailSubject = "Your Tailor Account is Verified";
+        emailHtml = `
+          <p>Dear Tailor,</p>
+          <p>Your account has been <strong>verified and approved</strong>. You can now sign in.</p>
+          <p><strong>Login ID:</strong> ${user.email}</p>
+          ${
+            tempPassword
+              ? `<p><strong>Temporary Password:</strong> ${tempPassword}</p>
+                 <p>Please change your password after logging in.</p>`
+              : `<p>Use your existing password to log in.</p>`
+          }
+          <p>Thank you for joining our platform!</p>
+        `;
+        break;
+
+      case "reject":
+        if (user.tailorInfo.status !== "pending") {
+          return res.status(400).json({ message: "Cannot reject a non-pending tailor" });
+        }
+        user.tailorInfo.status = "rejected";
+        user.status = "Rejected";
+        user.tailorInfo.reason = reason || "No reason provided"; // ✅
+
+        emailSubject = "Your Tailor Account Has Been Rejected";
+        emailHtml = `
+          <p>Dear Tailor,</p>
+          <p>We regret to inform you that your account has been <strong>rejected</strong>.</p>
+          <p><strong>Reason:</strong> ${user.tailorInfo.reason}</p>
+          <p>If you have any questions, please contact support.</p>
+        `;
+        break;
+
+      case "deactivate":
+        if (user.tailorInfo.status !== "approved") {
+          return res.status(400).json({ message: "Only approved tailors can be deactivated" });
+        }
+        user.tailorInfo.status = "deactivated";
+        user.status = "Deactivated";
+
+        emailSubject = "Your Tailor Account Has Been Deactivated";
+        emailHtml = `
+          <p>Dear Tailor,</p>
+          <p>Your account has been <strong>deactivated</strong> by the admin.</p>
+          <p>If you have any questions, please contact support.</p>
+        `;
+        break;
+
+      case "activate":
+        if (user.tailorInfo.status !== "deactivated") {
+          return res.status(400).json({ message: "Only deactivated tailors can be activated" });
+        }
+        user.tailorInfo.status = "approved";
+        user.status = "Approved";
+        user.tailorInfo.reason = reason || "No reason provided"; // ✅
+
+        emailSubject = "Your Tailor Account Has Been Reactivated";
+        emailHtml = `
+          <p>Dear Tailor,</p>
+          <p>Your account has been <strong>reactivated</strong>. You may now log in again.</p>
+          <p><strong>Reason:</strong> ${user.tailorInfo.reason}</p>
+          <p>Thank you for being with us.</p>
+        `;
+        break;
+
+      default:
+        return res.status(400).json({ message: "Invalid action. Must be 'approve', 'reject', 'deactivate', or 'activate'." });
+    }
+
+    await user.save();
+    await sendEmail(user.email, emailSubject, emailHtml);
+
+    return res.status(200).json({
+      message: `Tailor ${action} successfully and notified`,
+      userId: user._id,
+      action,
+      reason: user.tailorInfo.reason || null, // ✅ Single key in response
+      tempPassword: tempPassword || null,
+    });
+  } catch (error) {
+    console.error("Error verifying/rejecting/deactivating/activating tailor account:", error);
+    return next(error);
+  }
+};
+
+
+
+
+
+
 
 // Export at bottom
 // New (ESM)
 export {
+  getAllUsers,
+  verifyTailorAccount,
   verifyUser,
   approveUser,
   updateUserRole,
@@ -408,4 +643,7 @@ export {
   mediateDispute,
   getDisputeDetails
 };
+
+
+
 

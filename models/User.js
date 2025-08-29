@@ -4,10 +4,6 @@ import bcrypt from "bcryptjs/dist/bcrypt.js";
 
 const userSchema = new Schema(
   {
-    uid: {
-      type: String,
-      unique: true,
-    },
     email: {
       type: String,
       required: true,
@@ -15,62 +11,44 @@ const userSchema = new Schema(
       lowercase: true,
       trim: true,
     },
-    user_role: {
-      type: Schema.Types.ObjectId,
-      ref: "UserRole",
-      required: true,
-    },
-    first_name: {
-      type: String,
-      maxlength: 250,
-      required: true,
-    },
-    last_name: {
-      type: String,
-      maxlength: 250,
-      default: null,
-    },
-    phone_number: {
-      type: String,
-      maxlength: 15,
-    },
-    address: {
-      type: String,
-      default: null,
-    },
+    user_role: { type: Schema.Types.ObjectId, ref: "UserRole", required: true },
 
-    // Tailor-specific nested object
+    // Only these for naming
+    ownerName: { type: String, maxlength: 250, default: null },
+    businessName: { type: String, maxlength: 250, default: null },
+
+    phone_number: { type: String, maxlength: 15 },
+    address: { type: String, default: null },
+
+    // Tailor Info
     tailorInfo: {
       businessInfo: {
-        businessName: { type: String, required: false },
-        ownerName: { type: String, required: false },
-        email: { type: String },
-        phone: { type: String },
+        businessName: { type: String },
+        ownerName: { type: String },
         whatsapp: { type: String },
         locations: [{ type: String }],
-        address: { type: String },
       },
       professionalInfo: {
         gender: {
           type: String,
-          enum: ["Male", "Female", "Others"],
+          enum: ["male", "female", "others"],
           default: null,
         },
-        specialties: [{ type: String }],
-        experience: { type: String }, // e.g. "1-2"
+        specialties: [{ type: Schema.Types.ObjectId, ref: "Specialty" }],
+        experience: { type: String },
         description: { type: String, default: "" },
-        workingHours: { type: String, default: "" },
       },
       services: {
         homeMeasurement: { type: Boolean, default: false },
         rushOrders: { type: Boolean, default: false },
       },
       documents: {
-        tradeLicense: { type: Object, default: null },
-        emiratesId: { type: Object, default: null },
-        certificates: { type: Object, default: null },
-        portfolioImages: { type: Object, default: null },
+        tradeLicense: [{ type: String }],
+        emiratesId: [{ type: String }],
+        certificates: [{ type: String }],
+        portfolioImages: [{ type: String }],
       },
+      emiratesIdExpiry: { type: Date, default: null },
       additionalInfo: {
         socialMedia: {
           instagram: { type: String, default: "" },
@@ -81,12 +59,12 @@ const userSchema = new Schema(
       submittedAt: { type: Date, default: null },
       status: {
         type: String,
-        enum: ["pending", "approved", "rejected"],
+        enum: ["pending", "approved", "rejected", "deactivated"],
         default: "pending",
       },
     },
 
-    // 🔹 Shared fields (customers + tailors)
+    // Shared fields
     otp: { type: String, maxlength: 250, default: null },
     otp_time: { type: Date, default: null },
     is_active: { type: Boolean, default: true },
@@ -94,7 +72,14 @@ const userSchema = new Schema(
     refreshToken: { type: String, default: null },
     status: {
       type: String,
-      enum: ["Pending", "Approved", "Unapproved", "Blocked", "Rejected"],
+      enum: [
+        "Pending",
+        "Approved",
+        "Unapproved",
+        "Blocked",
+        "Rejected",
+        "Deactivated",
+      ],
       default: "Pending",
     },
     userStatus: {
@@ -104,16 +89,10 @@ const userSchema = new Schema(
     },
     country: { type: Schema.Types.ObjectId, ref: "Country", default: null },
     city: { type: Schema.Types.ObjectId, ref: "City", default: null },
-    location: {
-      type: Schema.Types.ObjectId,
-      ref: "Location", // references the Location master
-      default: null,
-    },
+    reason: { type: String, default: null }
+    // location: { type: Schema.Types.ObjectId, ref: "Location", default: null },
   },
-  {
-    timestamps: true,
-    versionKey: false,
-  }
+  { timestamps: true, versionKey: false }
 );
 
 userSchema.index({ location: "2dsphere" });
@@ -138,6 +117,8 @@ userSchema.methods.generateAccessToken = function () {
       email: this.email,
       first_name: this.first_name,
       last_name: this.last_name,
+      ownerName: this.ownerName,
+      businessName: this.businessName,
       phone_number: this.phone_number,
     },
     process.env.ACCESS_TOKEN_SECRET,
