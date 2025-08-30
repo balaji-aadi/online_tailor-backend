@@ -114,7 +114,6 @@ const loginCustomer = asyncHandler(async (req, res) => {
   }
 });
 
-//register customer
 const registerCustomer = asyncHandler(async (req, res) => {
   let {
     name,
@@ -126,6 +125,7 @@ const registerCustomer = asyncHandler(async (req, res) => {
     city,
     gender,
     age,
+    location, // expecting { coordinates: [lng, lat] } from frontend
   } = req.body;
 
   // ✅ Validate required fields
@@ -164,9 +164,20 @@ const registerCustomer = asyncHandler(async (req, res) => {
     emiratesIdProofUrls = uploads.filter((url) => url !== null);
   }
 
+  // ✅ Parse location if sent as JSON string
+  let parsedLocation = null;
+  if (location) {
+    parsedLocation =
+      typeof location === "string" ? JSON.parse(location) : location;
+    // Ensure coordinates array exists
+    if (!parsedLocation.coordinates || parsedLocation.coordinates.length !== 2) {
+      parsedLocation = null;
+    }
+  }
+
   // ✅ Create customer
   const customer = await Customer.create({
-    user_role: userRole._id, // store ObjectId
+    user_role: userRole._id,
     name,
     contactNumber,
     email,
@@ -178,7 +189,8 @@ const registerCustomer = asyncHandler(async (req, res) => {
     age,
     profilePicture: profilePictureUrl,
     emiratesIdProof: emiratesIdProofUrls,
-    status: "Approved", // default
+    status: "Approved",
+    location: parsedLocation || { type: "Point", coordinates: [0, 0] },
   });
 
   return res
@@ -186,7 +198,7 @@ const registerCustomer = asyncHandler(async (req, res) => {
     .json(new ApiResponse(201, customer, "Customer registered successfully"));
 });
 
-//update customer
+// ---------------- Update Customer ----------------
 const updateCustomer = asyncHandler(async (req, res) => {
   const { customerId } = req.params;
 
@@ -212,6 +224,7 @@ const updateCustomer = asyncHandler(async (req, res) => {
     gender,
     age,
     status, // only admin can change status
+    location, // coordinates update
   } = req.body;
 
   if (name) customer.name = name;
@@ -234,6 +247,19 @@ const updateCustomer = asyncHandler(async (req, res) => {
       await deleteFromCloudinary([customer.profilePicture]);
     const upload = await uploadOnCloudinary(req.files.profilePicture[0].path);
     customer.profilePicture = upload?.secure_url;
+  }
+
+  // Handle coordinates update
+  if (location) {
+    const parsedLocation =
+      typeof location === "string" ? JSON.parse(location) : location;
+    if (
+      parsedLocation &&
+      parsedLocation.coordinates &&
+      parsedLocation.coordinates.length === 2
+    ) {
+      customer.location = parsedLocation;
+    }
   }
 
   await customer.save();

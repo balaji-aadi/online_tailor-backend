@@ -32,9 +32,22 @@ const customerSchema = new Schema(
     country: { type: Schema.Types.ObjectId, ref: "Country", default: null },
     gender: { type: String, enum: ["male", "female", "others"] },
     age: { type: Number },
-    emiratesId: { type: String },  // store URL after Cloudinary upload
+    emiratesId: { type: String },  // Cloudinary URL
     profilePicture: { type: String }, // Cloudinary URL
     measurements: measurementSchema,
+
+    // ---------------- Coordinates ----------------
+    location: {
+      type: {
+        type: String,
+        enum: ["Point"],
+        default: "Point",
+      },
+      coordinates: {
+        type: [Number], // [longitude, latitude]
+        default: [0, 0],
+      },
+    },
   },
   { timestamps: true, versionKey: false }
 );

@@ -1,4 +1,13 @@
-import LocationMaster, { City, Country, Fabric, Specialty } from "../models/Master.js";
+import mongoose from "mongoose";
+import LocationMaster, {
+  Category,
+  City,
+  Country,
+  Fabric,
+  Measurement,
+  MeasurementTemplate,
+  Specialty,
+} from "../models/Master.js";
 import { UserRole } from "../models/userRole.js";
 import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
@@ -6,44 +15,549 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 import cities from "../utils/seeds/cities.js";
 import countries from "../utils/seeds/countries.js";
 import specialties from "../utils/seeds/specialties.js";
+import predefinedMeasurements from "../utils/seeds/measurements.js";
+import { uploadOnCloudinary, deleteFromCloudinary } from "../cloudinary.js";
 
+const createCategory = asyncHandler(async (req, res) => {
+  const { name, description } = req.body;
+  if (!name) throw new ApiError(400, "Category name is required");
 
-//Fabric Master
-// ---------------- Create Fabric ----------------
-const createFabric = asyncHandler(async (req, res) => {
-  const { name, code, description } = req.body;
-    console.log("req.body",req.body);
-  if (!name || !code) {
-    throw new ApiError(400, "Fabric name and code are required");
+  // 🔍 Check if category already exists (case-insensitive)
+  const existingCategory = await Category.findOne({
+    name: { $regex: new RegExp("^" + name + "$", "i") },
+  });
+  if (existingCategory) {
+    throw new ApiError(400, "Category with this name already exists");
   }
 
-  const existingFabric = await Fabric.findOne({ code });
-  if (existingFabric) {
-    throw new ApiError(400, "Fabric with this code already exists");
-  }
+  // let imageUrl = "";
+  // if (req.file) {
+  //   const upload = await uploadOnCloudinary(req.file.path);
+  //   if (upload?.secure_url) imageUrl = upload.secure_url;
+  // }
 
-  // Handle image upload
-  let imageUrl = "";
-  if (req.files?.image) {
-    const upload = await uploadOnCloudinary(req.files.image[0].path);
-    imageUrl = upload?.secure_url;
-  }
-
-  // Status: active if admin (role_id === 1), pending otherwise
-  const status = req.user?.user_role?.role_id === 1 ? "active" : "pending";
-
-  const fabric = await Fabric.create({
+  const category = await Category.create({
     name,
-    code,
     description,
-    image: imageUrl,
-    status,
-    createdBy: req.user._id,
+    // image: imageUrl,
+  });
+  return res
+    .status(201)
+    .json(new ApiResponse(201, category, "Category created successfully"));
+});
+
+const updateCategory = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { name, description } = req.body;
+
+  const category = await Category.findById(id);
+  if (!category) throw new ApiError(404, "Category not found");
+
+  if (name) category.name = name;
+  if (description) category.description = description;
+
+  // if (req.file) {
+  //   const upload = await uploadOnCloudinary(req.file.path);
+  //   if (upload?.secure_url) category.image = upload.secure_url;
+  // }
+
+  await category.save();
+  return res
+    .status(200)
+    .json(new ApiResponse(200, category, "Category updated successfully"));
+});
+
+const getCategories = asyncHandler(async (req, res) => {
+  const categories = await Category.find().sort({ createdAt: -1 });
+  return res
+    .status(200)
+    .json(new ApiResponse(200, categories, "Categories fetched successfully"));
+});
+
+const getCategoryById = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const category = await Category.findById(id);
+  if (!category) throw new ApiError(404, "Category not found");
+  return res
+    .status(200)
+    .json(new ApiResponse(200, category, "Category fetched successfully"));
+});
+
+const deleteCategory = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const category = await Category.findByIdAndDelete(id);
+  if (!category) throw new ApiError(404, "Category not found");
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, category, "Category deleted successfully"));
+});
+
+const createMeasurementTemplate = asyncHandler(async (req, res) => {
+  let { name, garmentType, description, measurementPoints } = req.body;
+
+  console.log("name:", name);
+  console.log("measurementPoints (raw):", measurementPoints);
+
+  if (!name || !garmentType || !measurementPoints) {
+    throw new ApiError(
+      400,
+      "Name, garmentType, and measurementPoints are required"
+    );
+  }
+
+  // ✅ Parse if stringified JSON
+  if (typeof measurementPoints === "string") {
+    try {
+      measurementPoints = JSON.parse(measurementPoints);
+    } catch (err) {
+      throw new ApiError(
+        400,
+        "Invalid measurementPoints format. Must be JSON array."
+      );
+    }
+  }
+
+  // ✅ Check if garmentType exists
+  const specialty = await Specialty.findById(garmentType);
+  if (!specialty) throw new ApiError(404, "Garment type not found");
+
+  // ✅ Handle images upload
+  let images = [];
+  if (req.files && req.files.length > 0) {
+    for (const file of req.files) {
+      const upload = await uploadOnCloudinary(file.path);
+      if (upload?.secure_url) images.push(upload.secure_url);
+    }
+  }
+
+  // ✅ Save to DB
+  const template = await MeasurementTemplate.create({
+    name,
+    garmentType,
+    description,
+    image: images,
+    measurementPoints,
   });
 
   return res
     .status(201)
-    .json(new ApiResponse(201, fabric, "Fabric created successfully"));
+    .json(
+      new ApiResponse(
+        201,
+        template,
+        "Measurement template created successfully"
+      )
+    );
+});
+
+// ---------------- Update Template ----------------
+const updateMeasurementTemplate = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  let { name, garmentType, description, measurementPoints } = req.body;
+
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    throw new ApiError(400, "Invalid ID");
+  }
+
+  const template = await MeasurementTemplate.findById(id);
+  if (!template) throw new ApiError(404, "Template not found");
+
+  if (garmentType) {
+    const specialty = await Specialty.findById(garmentType);
+    if (!specialty) throw new ApiError(404, "Garment type not found");
+    template.garmentType = garmentType;
+  }
+
+  if (name) template.name = name;
+  if (description) template.description = description;
+
+  if (measurementPoints) {
+    if (typeof measurementPoints === "string") {
+      try {
+        measurementPoints = JSON.parse(measurementPoints);
+      } catch (err) {
+        throw new ApiError(
+          400,
+          "Invalid measurementPoints format. Must be a JSON array."
+        );
+      }
+    }
+    template.measurementPoints = measurementPoints;
+  }
+
+  // Handle images
+  if (req.files && req.files.length > 0) {
+    template.image = []; // overwrite old images
+    for (const file of req.files) {
+      const upload = await uploadOnCloudinary(file.path);
+      if (upload?.secure_url) template.image.push(upload.secure_url);
+    }
+  }
+
+  await template.save();
+  return res
+    .status(200)
+    .json(new ApiResponse(200, template, "Template updated successfully"));
+});
+
+// ---------------- Get All Templates ----------------
+const getAllMeasurementTemplates = asyncHandler(async (req, res) => {
+  const templates = await MeasurementTemplate.find().populate(
+    "garmentType",
+    "name"
+  );
+  return res
+    .status(200)
+    .json(new ApiResponse(200, templates, "Templates fetched successfully"));
+});
+
+// ---------------- Get Template By ID ----------------
+const getMeasurementTemplateById = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  if (!mongoose.Types.ObjectId.isValid(id))
+    throw new ApiError(400, "Invalid ID");
+
+  const template = await MeasurementTemplate.findById(id).populate(
+    "garmentType",
+    "name"
+  );
+  if (!template) throw new ApiError(404, "Template not found");
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, template, "Template fetched successfully"));
+});
+
+// ---------------- Delete Template ----------------
+const deleteMeasurementTemplate = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  if (!mongoose.Types.ObjectId.isValid(id))
+    throw new ApiError(400, "Invalid ID");
+
+  const template = await MeasurementTemplate.findById(id);
+  if (!template) throw new ApiError(404, "Template not found");
+
+  await template.deleteOne({ _id: id });
+  return res
+    .status(200)
+    .json(new ApiResponse(200, null, "Template deleted successfully"));
+});
+
+const createMeasurements = asyncHandler(async (req, res) => {
+  const measurements = predefinedMeasurements; // array of { name, type, unit }
+
+  if (!Array.isArray(measurements) || measurements.length === 0) {
+    return res.status(400).json(new ApiError(400, "No measurements provided"));
+  }
+
+  const createdMeasurements = [];
+  const duplicateMeasurements = [];
+
+  for (let m of measurements) {
+    // Skip if missing required fields
+    if (!m.name || !m.type || !m.unit) continue;
+
+    // Check duplicate
+    const existing = await Measurement.findOne({
+      name: { $regex: new RegExp(`^${m.name}$`, "i") },
+      type: m.type,
+    });
+
+    if (existing) {
+      duplicateMeasurements.push(m.name);
+      continue;
+    }
+
+    const created = await Measurement.create({
+      name: m.name,
+      type: m.type,
+      unit: m.unit,
+    });
+
+    createdMeasurements.push(created);
+  }
+
+  let message = `${createdMeasurements.length} measurement(s) created successfully`;
+  if (duplicateMeasurements.length > 0) {
+    message += `. Skipped duplicates: ${duplicateMeasurements.join(", ")}`;
+  }
+
+  return res
+    .status(201)
+    .json(new ApiResponse(201, createdMeasurements, message));
+});
+
+const createMeasurement = asyncHandler(async (req, res) => {
+  const { name, type, unit } = req.body;
+
+  if (!name || !type || !unit) {
+    throw new ApiError(400, "Name, type, and unit are required");
+  }
+
+  // Duplicate check
+  const existing = await Measurement.findOne({
+    name: { $regex: new RegExp(`^${name}$`, "i") },
+    type,
+  });
+
+  if (existing) {
+    return res
+      .status(400)
+      .json(
+        new ApiError(
+          400,
+          `Measurement "${name}" already exists for type "${type}"`
+        )
+      );
+  }
+
+  const measurement = await Measurement.create({ name, type, unit });
+
+  return res
+    .status(201)
+    .json(
+      new ApiResponse(201, measurement, "Measurement created successfully")
+    );
+});
+
+// ---------------- Get all measurements ----------------
+const getAllMeasurements = asyncHandler(async (req, res) => {
+  const measurements = await Measurement.find();
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(200, measurements, "Measurements fetched successfully")
+    );
+});
+
+// ---------------- Get measurement by ID ----------------
+const getMeasurementById = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return res.status(400).json(new ApiError(400, "Invalid measurement ID"));
+  }
+
+  const measurement = await Measurement.findById(id);
+  if (!measurement) {
+    return res.status(404).json(new ApiError(404, "Measurement not found"));
+  }
+
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(200, measurement, "Measurement fetched successfully")
+    );
+});
+
+// ---------------- Update measurement ----------------
+const updateMeasurement = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { name, type, unit } = req.body;
+
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return res.status(400).json(new ApiError(400, "Invalid measurement ID"));
+  }
+
+  const measurement = await Measurement.findById(id);
+  if (!measurement) {
+    return res.status(404).json(new ApiError(404, "Measurement not found"));
+  }
+
+  // Check for duplicate name+type
+  if (name && type) {
+    const existing = await Measurement.findOne({
+      _id: { $ne: id },
+      name: { $regex: new RegExp(`^${name}$`, "i") },
+      type,
+    });
+    if (existing) {
+      return res
+        .status(400)
+        .json(
+          new ApiError(
+            400,
+            `Measurement with name "${name}" already exists for type "${type}"`
+          )
+        );
+    }
+  }
+
+  if (name) measurement.name = name;
+  if (type) measurement.type = type;
+  if (unit) measurement.unit = unit;
+
+  await measurement.save();
+
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(200, measurement, "Measurement updated successfully")
+    );
+});
+
+// ---------------- Delete measurement ----------------
+const deleteMeasurement = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return res.status(400).json(new ApiError(400, "Invalid measurement ID"));
+  }
+
+  const measurement = await Measurement.findById(id);
+  if (!measurement) {
+    return res.status(404).json(new ApiError(404, "Measurement not found"));
+  }
+
+  await measurement.deleteOne({ _id: id });
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, null, "Measurement deleted successfully"));
+});
+
+//Fabric Master
+// ---------------- Create Fabric ----------------
+// Utility to generate unique fabric code
+const generateFabricCode = async () => {
+  const lastFabric = await Fabric.findOne().sort({ createdAt: -1 });
+  let newCode = "FAB001";
+
+  if (lastFabric && lastFabric.code) {
+    // Extract number from last code (e.g., FAB005 → 5)
+    const lastNumber = parseInt(lastFabric.code.replace(/\D/g, ""), 10) || 0;
+    newCode = `FAB${String(lastNumber + 1).padStart(3, "0")}`;
+  }
+
+  return newCode;
+};
+
+// ---------------- Create Fabric ----------------
+const createFabric = asyncHandler(async (req, res) => {
+  const { name } = req.body;
+
+  if (!name) {
+    throw new ApiError(400, "Fabric name is required");
+  }
+
+  // Split into single/multiple names and trim
+  const fabricNames = name
+    .split(",")
+    .map((n) => n.trim())
+    .filter((n) => n.length > 0);
+
+  if (fabricNames.length === 0) {
+    throw new ApiError(400, "No valid fabric names provided");
+  }
+
+  // Upload multiple images (if any)
+  let images = [];
+  if (req.files && req.files.length > 0) {
+    for (const file of req.files) {
+      const upload = await uploadOnCloudinary(file.path);
+      if (upload?.secure_url) images.push(upload.secure_url);
+    }
+  }
+
+  // Check for duplicates in DB (case-insensitive)
+  const duplicateFabrics = [];
+  for (const fabricName of fabricNames) {
+    const existing = await Fabric.findOne({
+      name: { $regex: new RegExp(`^${fabricName}$`, "i") },
+    });
+    if (existing) duplicateFabrics.push(fabricName);
+  }
+
+  if (duplicateFabrics.length > 0) {
+    throw new ApiError(
+      400,
+      `Fabric(s) already exist: ${duplicateFabrics.join(", ")}`
+    );
+  }
+
+  const status = req.user?.user_role?.role_id === 1 ? "active" : "pending";
+  const createdFabrics = [];
+
+  for (let i = 0; i < fabricNames.length; i++) {
+    const fabricName = fabricNames[i];
+
+    // Auto-generate unique code
+    const code = await generateFabricCode();
+
+    const fabric = await Fabric.create({
+      name: fabricName,
+      code,
+      image: images[i] || "", // assign matching image if available
+      status,
+      createdBy: req.user._id,
+    });
+
+    createdFabrics.push(fabric);
+  }
+
+  return res
+    .status(201)
+    .json(
+      new ApiResponse(
+        201,
+        createdFabrics,
+        `${createdFabrics.length} Fabric(s) created successfully`
+      )
+    );
+});
+
+// ---------------- Update Fabric (for admin or tailor) ----------------
+const updateFabric = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { name } = req.body;
+
+  console.log("Update request body:", req.body);
+  console.log("Files received:", req.files);
+
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return res
+      .status(400)
+      .json(new ApiResponse(400, null, "Invalid fabric id"));
+  }
+
+  const fabric = await Fabric.findById(id);
+  if (!fabric)
+    return res.status(404).json(new ApiResponse(404, null, "Fabric not found"));
+
+  // Check for duplicate name
+  if (name) {
+    const existing = await Fabric.findOne({
+      _id: { $ne: id },
+      name: { $regex: new RegExp(`^${name}$`, "i") },
+    });
+    if (existing) {
+      return res
+        .status(400)
+        .json(
+          new ApiResponse(
+            400,
+            null,
+            `Fabric with name "${name}" already exists`
+          )
+        );
+    }
+    fabric.name = name;
+  }
+
+  // Handle image update
+  if (req.files && req.files.length > 0) {
+    if (fabric.image) console.log("Deleting old image:", fabric.image);
+    if (fabric.image) await deleteFromCloudinary([fabric.image]);
+    const upload = await uploadOnCloudinary(req.files[0].path);
+    fabric.image = upload?.secure_url;
+    console.log("New image uploaded:", fabric.image);
+  }
+
+  await fabric.save();
+  console.log("Fabric saved:", fabric);
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, fabric, "Fabric updated successfully"));
 });
 
 // ---------------- Admin Update Fabric Status ----------------
@@ -80,37 +594,6 @@ const updateFabricStatus = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, fabric, `Fabric ${status} successfully`));
 });
 
-// ---------------- Update Fabric (for admin or tailor) ----------------
-const updateFabric = asyncHandler(async (req, res) => {
-  const { id } = req.params;
-  const { name, code, description } = req.body;
-
-  if (!mongoose.Types.ObjectId.isValid(id)) {
-    return res
-      .status(400)
-      .json(new ApiResponse(400, null, "Invalid fabric id"));
-  }
-
-  const fabric = await Fabric.findById(id);
-  if (!fabric)
-    return res.status(404).json(new ApiResponse(404, null, "Fabric not found"));
-
-  if (name) fabric.name = name;
-  if (code) fabric.code = code;
-  if (description) fabric.description = description;
-
-  if (req.files?.image) {
-    if (fabric.image) await deleteFromCloudinary([fabric.image]);
-    const upload = await uploadOnCloudinary(req.files.image[0].path);
-    fabric.image = upload?.secure_url;
-  }
-
-  await fabric.save();
-  return res
-    .status(200)
-    .json(new ApiResponse(200, fabric, "Fabric updated successfully"));
-});
-
 // ---------------- Get All Fabrics ----------------
 const getAllFabric = asyncHandler(async (req, res) => {
   const fabrics = await Fabric.find()
@@ -143,8 +626,6 @@ const deleteFabric = asyncHandler(async (req, res) => {
     .status(200)
     .json(new ApiResponse(200, null, "Fabric deleted successfully"));
 });
-
-
 
 // Create role
 const createRole = asyncHandler(async (req, res) => {
@@ -615,13 +1096,24 @@ const createSpecialties = asyncHandler(async (req, res) => {
 const createSpecialty = asyncHandler(async (req, res) => {
   const { name } = req.body;
 
-  if (!name) {
+  if (!name) throw new ApiError(400, "Specialty name is required");
+
+  // Check if specialty already exists (case-insensitive)
+  const existingSpecialty = await Specialty.findOne({
+    name: { $regex: new RegExp(`^${name}$`, "i") },
+  });
+  if (existingSpecialty) {
     return res
       .status(400)
-      .json(new ApiError(400, "Specialty name is required"));
+      .json(new ApiError(400, `Specialty "${name}" already exists`));
   }
 
-  const specialty = await Specialty.create({ name });
+  // Upload image if provided
+  const image = req.file
+    ? await uploadOnCloudinary(req.file.path).then((u) => u?.secure_url)
+    : "";
+
+  const specialty = await Specialty.create({ name, image });
 
   return res
     .status(201)
@@ -631,31 +1123,48 @@ const createSpecialty = asyncHandler(async (req, res) => {
 // Update specialty by ID
 const updateSpecialty = asyncHandler(async (req, res) => {
   const { specialtyId } = req.params;
-  const updatedData = req.body;
+  const { name } = req.body;
 
-  if (!updatedData || Object.keys(updatedData).length === 0) {
+  if (!mongoose.Types.ObjectId.isValid(specialtyId)) {
     return res
       .status(400)
-      .json(new ApiError(400, "No data provided to update"));
+      .json(new ApiResponse(400, null, "Invalid specialty ID"));
   }
 
   const specialty = await Specialty.findById(specialtyId);
+  if (!specialty)
+    return res
+      .status(404)
+      .json(new ApiResponse(404, null, "Specialty not found"));
 
-  if (!specialty) {
-    return res.status(404).json(new ApiError(404, "Specialty not found"));
+  // Check for duplicate name before updating
+  if (name && name.toLowerCase() !== specialty.name.toLowerCase()) {
+    const existing = await Specialty.findOne({
+      _id: { $ne: specialtyId },
+      name: { $regex: new RegExp(`^${name}$`, "i") },
+    });
+    if (existing) {
+      return res
+        .status(400)
+        .json(
+          new ApiError(400, `Specialty with name "${name}" already exists`)
+        );
+    }
+    specialty.name = name;
   }
 
-  const updatedSpecialty = await Specialty.findByIdAndUpdate(
-    specialtyId,
-    updatedData,
-    { new: true }
-  );
+  // Image update
+  if (req.file) {
+    if (specialty.image) await deleteFromCloudinary([specialty.image]);
+    const upload = await uploadOnCloudinary(req.file.path);
+    specialty.image = upload?.secure_url || "";
+  }
+
+  await specialty.save();
 
   return res
     .status(200)
-    .json(
-      new ApiResponse(200, updatedSpecialty, "Specialty updated successfully")
-    );
+    .json(new ApiResponse(200, specialty, "Specialty updated successfully"));
 });
 
 // Get all specialties
@@ -715,6 +1224,25 @@ const deleteAllSpecialties = asyncHandler(async (req, res) => {
 });
 
 export {
+  createCategory,
+  updateCategory,
+  getCategories,
+  getCategoryById,
+  deleteCategory,
+
+  createMeasurementTemplate,
+  getAllMeasurementTemplates,
+  getMeasurementTemplateById,
+  updateMeasurementTemplate,
+  deleteMeasurementTemplate,
+
+  createMeasurements,
+  createMeasurement,
+  getAllMeasurements,
+  getMeasurementById,
+  updateMeasurement,
+  deleteMeasurement,
+
   createFabric,
   updateFabricStatus,
   updateFabric,

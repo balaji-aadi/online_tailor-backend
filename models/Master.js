@@ -96,9 +96,9 @@ citySchema.index({ name: 1 });
 
 const locationSchema = new Schema(
   {
-    user: { type: Schema.Types.ObjectId, ref: "User", required: true }, 
+    user: { type: Schema.Types.ObjectId, ref: "User", required: true },
     country: { type: Schema.Types.ObjectId, ref: "Country", required: true },
-    city: { type: Schema.Types.ObjectId, ref: "City", required: true }, 
+    city: { type: Schema.Types.ObjectId, ref: "City", required: true },
     street: { type: String, required: true },
     coordinates: {
       type: { type: String, enum: ["Point"], default: "Point" },
@@ -117,7 +117,11 @@ const specialtySchema = new mongoose.Schema(
       type: String,
       required: true,
       maxlength: 250,
-      unique: true,
+      unique: true, // still ensures uniqueness at DB level
+    },
+    image: {
+      type: String, // store Cloudinary URL or path
+      default: "", // optional field
     },
   },
   {
@@ -125,7 +129,6 @@ const specialtySchema = new mongoose.Schema(
     versionKey: false,
   }
 );
-
 
 const fabricSchema = new Schema(
   {
@@ -144,9 +147,83 @@ const fabricSchema = new Schema(
   { timestamps: true, versionKey: false }
 );
 
-export const Fabric=  mongoose.model("Fabric", fabricSchema);
+const measurementSchema = new mongoose.Schema(
+  {
+    name: {
+      type: String,
+      required: true,
+      maxlength: 100,
+      unique: true, // unique globally
+    },
+    type: {
+      type: String,
+      enum: ["top_wear", "bottom_wear", "common"],
+      required: true,
+    },
+    unit: {
+      type: String,
+      enum: ["cm", "inch"],
+      required: true,
+    },
+  },
+  {
+    timestamps: true,
+    versionKey: false,
+  }
+);
 
-export const Specialty = mongoose.model('Specialty', specialtySchema);
+
+const measurementPointSchema = new mongoose.Schema(
+  {
+    name: { type: String, required: true },
+    unit: { type: String, enum: ["cm", "inch"], required: true },
+    required: { type: Boolean, default: true },
+  },
+  { _id: false } // no separate _id for each point
+);
+
+const measurementTemplateSchema = new mongoose.Schema(
+  {
+    name: { type: String, required: true },
+    garmentType: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Specialty",
+      required: true,
+    },
+    description: { type: String },
+    image: [{ type: String }], // Cloudinary URLs
+    measurementPoints: [measurementPointSchema],
+  },
+  { timestamps: true, versionKey: false }
+);
+
+
+const categorySchema = new mongoose.Schema(
+  {
+    name: {
+      type: String,
+      required: true,
+      unique: true,
+      trim: true,
+    },
+    
+    description: {
+      type: String,
+      maxlength: 500,
+    },
+  },
+  { timestamps: true, versionKey: false }
+);
+
+export const Category = mongoose.model("Category", categorySchema);
+
+export const MeasurementTemplate = mongoose.model("MeasurementTemplate",measurementTemplateSchema);
+
+export const Measurement = mongoose.model("Measurement", measurementSchema);
+
+export const Fabric = mongoose.model("Fabric", fabricSchema);
+
+export const Specialty = mongoose.model("Specialty", specialtySchema);
 
 const LocationMaster = mongoose.model("LocationMaster", locationSchema);
 export default LocationMaster;
