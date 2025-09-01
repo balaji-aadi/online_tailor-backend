@@ -527,7 +527,8 @@ const verifyTailorAccount = async (req, res, next) => {
         user.status = "Approved";
 
         if (generateTempPassword || !user.password) {
-          tempPassword = Math.random().toString(36).slice(-10) + "A1!";
+          // tempPassword = Math.random().toString(36).slice(-10) + "A1!";
+          tempPassword = "India@123";
           user.password = tempPassword;
         }
 

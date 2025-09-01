@@ -350,7 +350,7 @@ const loginUser = asyncHandler(async (req, res) => {
   try {
     const { emailOrPhone, password, provider } = req.body;
     const requestedRoleId = Number(req.params.role_id);
-
+    console.log("req:",req.body)
     if (!emailOrPhone) {
       return res.status(400).json(new ApiError(400, "Missing required field: emailOrPhone"));
     }

@@ -215,6 +215,46 @@ const categorySchema = new mongoose.Schema(
   { timestamps: true, versionKey: false }
 );
 
+const taxMasterSchema = new mongoose.Schema(
+  {
+    taxName: {
+      type: String,
+      required: true,
+      trim: true,
+      unique: true,
+    },
+    value: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
+    valueType: {
+      type: String,
+      required: true,
+      enum: ["percentage", "absolute"],
+      lowercase: true,
+    },
+    isActive: {
+      type: Boolean,
+      default: false,
+    },
+  },
+  { timestamps: true }
+);
+
+// Ensure only one tax is active at a time
+taxMasterSchema.pre("save", async function (next) {
+  if (this.isActive) {
+    await this.constructor.updateMany(
+      { _id: { $ne: this._id } },
+      { isActive: false }
+    );
+  }
+  next();
+});
+
+export const TaxMaster = mongoose.model("TaxMaster", taxMasterSchema);
+
 export const Category = mongoose.model("Category", categorySchema);
 
 export const MeasurementTemplate = mongoose.model("MeasurementTemplate",measurementTemplateSchema);

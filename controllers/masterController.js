@@ -7,6 +7,7 @@ import LocationMaster, {
   Measurement,
   MeasurementTemplate,
   Specialty,
+  TaxMaster,
 } from "../models/Master.js";
 import { UserRole } from "../models/userRole.js";
 import { ApiError } from "../utils/ApiError.js";
@@ -17,6 +18,95 @@ import countries from "../utils/seeds/countries.js";
 import specialties from "../utils/seeds/specialties.js";
 import predefinedMeasurements from "../utils/seeds/measurements.js";
 import { uploadOnCloudinary, deleteFromCloudinary } from "../cloudinary.js";
+
+
+
+// Create Tax
+const createTax = asyncHandler(async (req, res) => {
+  const { taxName, value, isActive, valueType } = req.body;
+
+  if (!taxName) throw new ApiError(400, "Tax name is required");
+  if (value === undefined) throw new ApiError(400, "Tax value is required");
+  if (!valueType || !["percentage", "absolute"].includes(valueType.toLowerCase())) {
+    throw new ApiError(400, "Value type must be either 'percentage' or 'absolute'");
+  }
+
+  // Check if tax with same name AND valueType already exists (case-insensitive)
+  const existingTax = await TaxMaster.findOne({
+    taxName: { $regex: new RegExp("^" + taxName + "$", "i") },
+    valueType: valueType.toLowerCase()
+  });
+  if (existingTax) throw new ApiError(400, "A tax with this name and type already exists");
+
+  const tax = await TaxMaster.create({ taxName, value, isActive, valueType: valueType.toLowerCase() });
+
+  // If this tax is active, deactivate all other taxes
+  if (isActive) {
+    await TaxMaster.updateMany({ _id: { $ne: tax._id } }, { isActive: false });
+  }
+
+  return res
+    .status(201)
+    .json(new ApiResponse(201, tax, "Tax created successfully"));
+});
+// Update Tax
+const updateTax = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { taxName, value, isActive, valueType } = req.body;
+
+  const tax = await TaxMaster.findById(id);
+  if (!tax) throw new ApiError(404, "Tax not found");
+
+  if (taxName) tax.taxName = taxName;
+  if (value !== undefined) tax.value = value;
+  if (valueType && ["percentage", "absolute"].includes(valueType.toLowerCase())) tax.valueType = valueType;
+  if (isActive !== undefined) tax.isActive = isActive;
+
+  // If this tax is set active, deactivate all other taxes
+  if (isActive) {
+    await TaxMaster.updateMany({ _id: { $ne: tax._id } }, { isActive: false });
+  }
+
+  await tax.save();
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, tax, "Tax updated successfully"));
+});
+// Get all taxes
+const getTaxes = asyncHandler(async (req, res) => {
+  const taxes = await TaxMaster.find().sort({ createdAt: -1 });
+  return res.status(200).json(new ApiResponse(200, taxes, "Taxes fetched successfully"));
+});
+// Delete Tax
+const deleteTax = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  // First check if tax exists
+  const tax = await TaxMaster.findById(id);
+  if (!tax) throw new ApiError(404, "Tax not found");
+
+  // Prevent deletion if active
+  if (tax.isActive) {
+    throw new ApiError(400, "Cannot delete an active tax. Deactivate it first.");
+  }
+
+  // Now safely delete
+  await TaxMaster.findByIdAndDelete(id);
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, null, "Tax deleted successfully"));
+});
+
+
+const getActiveTax = asyncHandler(async (req, res) => {
+  const tax = await TaxMaster.findOne({ isActive: true });
+  if (!tax) return res.status(404).json(new ApiResponse(404, null, "No active tax found"));
+
+  return res.status(200).json(new ApiResponse(200, tax, "Active tax fetched successfully"));
+});
+
 
 const createCategory = asyncHandler(async (req, res) => {
   const { name, description } = req.body;
@@ -1224,6 +1314,12 @@ const deleteAllSpecialties = asyncHandler(async (req, res) => {
 });
 
 export {
+  createTax,
+  updateTax,
+  getTaxes,
+  deleteTax,
+  getActiveTax, 
+
   createCategory,
   updateCategory,
   getCategories,

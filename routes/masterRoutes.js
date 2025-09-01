@@ -11,6 +11,7 @@ import {
   createRole,
   createSpecialties,
   createSpecialty,
+  createTax,
   deleteAllCities,
   deleteAllCountry,
   deleteAllSpecialties,
@@ -20,6 +21,8 @@ import {
   deleteMeasurement,
   deleteMeasurementTemplate,
   deleteSpecialty,
+  deleteTax,
+  getActiveTax,
   getAllActiveRole,
   getAllCity,
   getAllCountry,
@@ -37,6 +40,7 @@ import {
   getMeasurementTemplateById,
   getRoleById,
   getSpecialtyById,
+  getTaxes,
   updateCategory,
   updateCity,
   updateCountry,
@@ -47,16 +51,23 @@ import {
   updateMeasurementTemplate,
   updateRole,
   updateSpecialty,
+  updateTax,
 } from "../controllers/masterController.js";
-import { verifyJWT } from "../middleware/authMiddleware.js";
-import { adminOnly } from "../middleware/role.middleware.js";
+import { adminOnly, verifyJWT } from "../middleware/authMiddleware.js";
 import multer from "../middleware/multer.middleware.js";
 
 const router = Router();
+ 
+  
 
+//Tax Master
+router.route("/create-tax").post(verifyJWT,adminOnly,createTax);
+router.route("/update-tax/:id").put(verifyJWT,adminOnly,updateTax);
+router.route("/get-all-taxes").post(getTaxes);
+router.route("/get-active-tax").get(verifyJWT, getActiveTax);
+router.delete("/delete-tax/:id",verifyJWT,adminOnly, deleteTax);
 
 //Category
-
 router.route("/create-category").post(verifyJWT,createCategory);
 router.route("/update-category/:id").put(verifyJWT,updateCategory);
 router.route("/get-all-categories").post(getCategories);
