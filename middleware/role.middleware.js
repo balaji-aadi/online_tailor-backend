@@ -4,7 +4,7 @@ import { asyncHandler } from '../utils/asyncHandler.js';
 
 
 export const adminOnly = asyncHandler(async (req, res, next) => {
-    console.log('req adminOnly:', req.user);
+    // console.log('req adminOnly:', req.user);
   if (!req.user || !req.user._id) {
     return res.status(401).json(new ApiError(401, "Unauthorized User"));
   }

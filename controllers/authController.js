@@ -1,4 +1,3 @@
-
 import { uploadOnCloudinary, deleteFromCloudinary } from "../cloudinary.js";
 import jwt from "jsonwebtoken";
 import nodemailer from "nodemailer";
@@ -15,14 +14,15 @@ import { tailorWelcomeEmail } from "../utils/emails/welEmail.js";
 import { sendEmail } from "../utils/emails/sendEmail.js";
 import Customer from "../models/Customer.js";
 
-
 //generate access and refreshtoken
 const generateAccessAndRefereshTokens = async (userId, roleId) => {
   try {
     console.log("userId passed:", userId, typeof userId);
 
     if (!mongoose.Types.ObjectId.isValid(userId)) {
-      throw new Error("Invalid userId passed to generateAccessAndRefereshTokens");
+      throw new Error(
+        "Invalid userId passed to generateAccessAndRefereshTokens"
+      );
     }
 
     // Choose model based on role
@@ -32,17 +32,21 @@ const generateAccessAndRefereshTokens = async (userId, roleId) => {
     if (!user) throw new Error("User not found");
 
     // Use model methods if they exist (for User)
-    const accessToken = user.generateAccessToken?.() || jwt.sign(
-      { _id: user._id, email: user.email },
-      process.env.ACCESS_TOKEN_SECRET,
-      { expiresIn: process.env.ACCESS_TOKEN_EXPIRY }
-    );
+    const accessToken =
+      user.generateAccessToken?.() ||
+      jwt.sign(
+        { _id: user._id, email: user.email },
+        process.env.ACCESS_TOKEN_SECRET,
+        { expiresIn: process.env.ACCESS_TOKEN_EXPIRY }
+      );
 
-    const refreshToken = user.generateRefreshToken?.() || jwt.sign(
-      { _id: user._id, email: user.email },
-      process.env.REFRESH_TOKEN_SECRET,
-      { expiresIn: process.env.REFRESH_TOKEN_EXPIRY }
-    );
+    const refreshToken =
+      user.generateRefreshToken?.() ||
+      jwt.sign(
+        { _id: user._id, email: user.email },
+        process.env.REFRESH_TOKEN_SECRET,
+        { expiresIn: process.env.REFRESH_TOKEN_EXPIRY }
+      );
 
     user.refreshToken = refreshToken;
     await user.save({ validateBeforeSave: false });
@@ -50,12 +54,11 @@ const generateAccessAndRefereshTokens = async (userId, roleId) => {
     return { accessToken, refreshToken };
   } catch (error) {
     console.error("Error generating tokens:", error);
-    throw new Error("Something went wrong while generating refresh and access token");
+    throw new Error(
+      "Something went wrong while generating refresh and access token"
+    );
   }
 };
-
-
-
 
 //checkEmail
 const checkEmail = asyncHandler(async (req, res) => {
@@ -81,13 +84,12 @@ const checkEmail = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, roleId, "User data fetched successfully"));
 });
 
-
 //authController.js
 
 const registerUser = asyncHandler(async (req, res) => {
   try {
-    console.log("User Register Req.body:", req.body);
-    console.log("User Register Req.files:", req.files);
+    // console.log("User Register Req.body:", req.body);
+    // console.log("User Register Req.files:", req.files);
 
     let {
       email,
@@ -98,12 +100,14 @@ const registerUser = asyncHandler(async (req, res) => {
       password,
       whatsapp,
       locations,
+      coordinates,
       gender,
       specialties,
       experience,
       description,
       homeMeasurement,
       rushOrders,
+      termsPrivacyAgree,
       emiratesIdExpiry,
       socialMedia,
     } = req.body;
@@ -116,22 +120,39 @@ const registerUser = asyncHandler(async (req, res) => {
       locations = locations ? JSON.parse(locations) : [];
       socialMedia = socialMedia ? JSON.parse(socialMedia) : {};
     } catch (parseErr) {
-      throw new ApiError(400, "Invalid JSON format in specialties, locations, or socialMedia");
+      throw new ApiError(
+        400,
+        "Invalid JSON format in specialties, locations, or socialMedia"
+      );
     }
 
-    if (!email || !user_role) throw new ApiError(400, "Email and user_role are required");
+    if (!email || !user_role)
+      throw new ApiError(400, "Email and user_role are required");
 
     // -------------------------------
     // Check if user already exists
     // -------------------------------
     const existedUser = await User.findOne({ email });
-    if (existedUser) throw new ApiError(400, "User with this email already exists");
+    if (existedUser)
+      throw new ApiError(400, "User with this email already exists");
 
     // -------------------------------
     // Validate user role
     // -------------------------------
     const userRole = await UserRole.findOne({ role_id: user_role });
     if (!userRole) throw new ApiError(400, "Invalid user role");
+
+    if (
+      !coordinates ||
+      !coordinates.type ||
+      coordinates.type !== "Point" ||
+      !Array.isArray(coordinates.coordinates) ||
+      coordinates.coordinates.length !== 2
+    ) {
+      return res.status(400).json({
+        message: "Coordinates must be a GeoJSON Point with [lng, lat]",
+      });
+    }
 
     // -------------------------------
     // Handle file uploads to Cloudinary
@@ -140,25 +161,33 @@ const registerUser = asyncHandler(async (req, res) => {
 
     const uploadFiles = async (fileArray) => {
       if (!fileArray) return [];
-      const uploadPromises = fileArray.map((file) => uploadOnCloudinary(file.path));
+      const uploadPromises = fileArray.map((file) =>
+        uploadOnCloudinary(file.path)
+      );
       const results = await Promise.all(uploadPromises);
       return results.filter((r) => r).map((r) => r.secure_url);
     };
 
-    const [emiratesId, tradeLicense, certificates, portfolioImages] = await Promise.all([
-      uploadFiles(files.emiratesId),
-      uploadFiles(files.tradeLicense),
-      uploadFiles(files.certificates),
-      uploadFiles(files.portfolioImages),
-    ]);
+    const [emiratesId, tradeLicense, certificates, portfolioImages] =
+      await Promise.all([
+        uploadFiles(files.emiratesId),
+        uploadFiles(files.tradeLicense),
+        uploadFiles(files.certificates),
+        uploadFiles(files.portfolioImages),
+      ]);
 
     // -------------------------------
     // Validate specialties
     // -------------------------------
     let specialtiesData = [];
     if (specialties.length > 0) {
-      const validSpecialties = await Specialty.find({ _id: { $in: specialties } });
-      specialtiesData = validSpecialties.map((s) => ({ _id: s._id, name: s.name }));
+      const validSpecialties = await Specialty.find({
+        _id: { $in: specialties },
+      });
+      specialtiesData = validSpecialties.map((s) => ({
+        _id: s._id,
+        name: s.name,
+      }));
     }
 
     // -------------------------------
@@ -172,12 +201,22 @@ const registerUser = asyncHandler(async (req, res) => {
       country,
       password: password || "",
       status: userRole.name === "customer" ? "Approved" : "Pending",
+      coordinates: {
+        type: "Point",
+        coordinates: coordinates.coordinates.map((c) => parseFloat(c)), // ensure numbers
+      },
+      termsPrivacyAgree: termsPrivacyAgree || false,
     };
 
     if (user_role == 2) {
       userPayload.tailorInfo = {
         businessInfo: { businessName, ownerName, whatsapp, locations },
-        professionalInfo: { gender, specialties: specialtiesData, experience, description },
+        professionalInfo: {
+          gender,
+          specialties: specialtiesData,
+          experience,
+          description,
+        },
         services: { homeMeasurement, rushOrders },
         documents: { emiratesId, tradeLicense, certificates, portfolioImages },
         emiratesIdExpiry,
@@ -188,7 +227,10 @@ const registerUser = asyncHandler(async (req, res) => {
     }
 
     // Admin-created tailor auto-approve
-    if (req.user?.user_role?.role_id === 1 || req.user?.user_role?.role_id === 6) {
+    if (
+      req.user?.user_role?.role_id === 1 ||
+      req.user?.user_role?.role_id === 6
+    ) {
       userPayload.status = "Approved";
       if (user_role == 2 && userPayload.tailorInfo) {
         userPayload.tailorInfo.status = "approved";
@@ -207,17 +249,19 @@ const registerUser = asyncHandler(async (req, res) => {
     // -------------------------------
     // Send Welcome Email to Tailors
     // -------------------------------
-    if (user_role == 2) {
-      try {
-        await sendEmail(
-          email,
-          "Welcome to Tailor Platform – Next Steps",
-          tailorWelcomeEmail(ownerName, businessName)
-        );
-      } catch (mailErr) {
-        console.error("Error sending tailor welcome email:", mailErr);
-      }
-    }
+   if (user_role == 2) {
+  try {
+    await sendEmail({
+      to: email, // 👈 must be key 'to'
+      subject: "Welcome to Tailor Platform – Next Steps",
+      html: tailorWelcomeEmail(ownerName, businessName),
+      text: `Welcome ${ownerName} to Tailor Platform!`, // optional plain text
+    });
+  } catch (mailErr) {
+    console.error("Error sending tailor welcome email:", mailErr);
+  }
+}
+
 
     return res
       .status(201)
@@ -225,26 +269,34 @@ const registerUser = asyncHandler(async (req, res) => {
   } catch (err) {
     console.error("Error in registerUser:", err);
 
-    if (err.name === "ValidationError") return res.status(400).json(new ApiError(400, err.message));
+    if (err.name === "ValidationError")
+      return res.status(400).json(new ApiError(400, err.message));
     if (err.code === 11000) {
       const dupField = Object.keys(err.keyPattern || {})[0];
-      return res.status(400).json(new ApiError(400, `${dupField} must be unique`));
+      return res
+        .status(400)
+        .json(new ApiError(400, `${dupField} must be unique`));
     }
-    if (err.name === "CastError") return res.status(400).json(new ApiError(400, `Invalid ${err.path}: ${err.value}`));
+    if (err.name === "CastError")
+      return res
+        .status(400)
+        .json(new ApiError(400, `Invalid ${err.path}: ${err.value}`));
 
     return res
       .status(err.statusCode || 500)
-      .json(new ApiError(err.statusCode || 500, err.message || "Internal Server Error"));
+      .json(
+        new ApiError(
+          err.statusCode || 500,
+          err.message || "Internal Server Error"
+        )
+      );
   }
 });
-
-
-
 
 // loginUser
 // const loginUser = asyncHandler(async (req, res) => {
 //   try {
-   
+
 //     const { emailOrPhone, password, provider } = req.body;
 
 //     const requiredFields = {
@@ -272,14 +324,14 @@ const registerUser = asyncHandler(async (req, res) => {
 //         user = await User.findOne({ email: emailOrPhone }).populate(
 //           "user_role"
 //         );
-        
+
 //         if (!user)
 //           return res.status(400).json(new ApiError(400, "Email not found!"));
 //       } else {
 //         user = await User.findOne({ phone_number: emailOrPhone }).populate(
 //           "user_role"
 //         );
-       
+
 //         if (!user)
 //           return res
 //             .status(400)
@@ -298,12 +350,12 @@ const registerUser = asyncHandler(async (req, res) => {
 //         user = await User.findOne({
 //           email: emailOrPhone,
 //         }).populate("user_role");
-       
+
 //       } else {
 //         user = await User.findOne({
 //           phone_number: emailOrPhone,
 //         }).populate("user_role");
-         
+
 //       }
 //     }
 
@@ -350,9 +402,11 @@ const loginUser = asyncHandler(async (req, res) => {
   try {
     const { emailOrPhone, password, provider } = req.body;
     const requestedRoleId = Number(req.params.role_id);
-    console.log("req:",req.body)
+    console.log("req:", req.body);
     if (!emailOrPhone) {
-      return res.status(400).json(new ApiError(400, "Missing required field: emailOrPhone"));
+      return res
+        .status(400)
+        .json(new ApiError(400, "Missing required field: emailOrPhone"));
     }
 
     // Choose model based on role
@@ -364,22 +418,38 @@ const loginUser = asyncHandler(async (req, res) => {
     if (!provider) {
       // Normal login
       if (emailOrPhone.includes("@")) {
-        user = await Model.findOne({ email: emailOrPhone }).populate("user_role");
-        if (!user) return res.status(400).json(new ApiError(400, "Email not found!"));
+        user = await Model.findOne({ email: emailOrPhone }).populate(
+          "user_role"
+        );
+        if (!user)
+          return res.status(400).json(new ApiError(400, "Email not found!"));
       } else {
-        user = await Model.findOne({ [phoneField]: emailOrPhone }).populate("user_role");
-        if (!user) return res.status(400).json(new ApiError(400, "Phone number not found!"));
+        user = await Model.findOne({ [phoneField]: emailOrPhone }).populate(
+          "user_role"
+        );
+        if (!user)
+          return res
+            .status(400)
+            .json(new ApiError(400, "Phone number not found!"));
       }
 
       // Password check
       const isPasswordValid = await user.isPasswordCorrect(password);
-      if (!isPasswordValid) return res.status(401).json(new ApiError(401, "Invalid user credentials"));
+
+      if (!isPasswordValid)
+        return res
+          .status(401)
+          .json(new ApiError(401, "Invalid user credentials"));
     } else {
       // Provider login
       if (emailOrPhone.includes("@")) {
-        user = await Model.findOne({ email: emailOrPhone }).populate("user_role");
+        user = await Model.findOne({ email: emailOrPhone }).populate(
+          "user_role"
+        );
       } else {
-        user = await Model.findOne({ [phoneField]: emailOrPhone }).populate("user_role");
+        user = await Model.findOne({ [phoneField]: emailOrPhone }).populate(
+          "user_role"
+        );
       }
     }
 
@@ -390,11 +460,16 @@ const loginUser = asyncHandler(async (req, res) => {
 
     const actualRoleId = user.user_role.role_id;
     if (actualRoleId !== 1 && actualRoleId !== requestedRoleId) {
-      return res.status(404).json(new ApiError(404, "User does not exist or role mismatch"));
+      return res
+        .status(404)
+        .json(new ApiError(404, "User does not exist or role mismatch"));
     }
 
     // Generate tokens
-    const { accessToken, refreshToken } = await generateAccessAndRefereshTokens(user._id, actualRoleId);
+    const { accessToken, refreshToken } = await generateAccessAndRefereshTokens(
+      user._id,
+      actualRoleId
+    );
 
     // Remove sensitive info
     const loggedInUser = await Model.findById(user._id)
@@ -410,15 +485,17 @@ const loginUser = asyncHandler(async (req, res) => {
       .cookie("accessToken", accessToken, options)
       .cookie("refreshToken", refreshToken, options)
       .json(
-        new ApiResponse(200, { user: loggedInUser, accessToken, refreshToken }, "User logged in successfully")
+        new ApiResponse(
+          200,
+          { user: loggedInUser, accessToken, refreshToken },
+          "User logged in successfully"
+        )
       );
   } catch (error) {
     console.error("Error during login:", error);
     return res.status(500).json(new ApiError(500, "Internal Server Error"));
   }
 });
-
-
 
 //logoutuser
 const logoutUser = asyncHandler(async (req, res) => {
@@ -446,17 +523,20 @@ const logoutUser = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, {}, "User logged Out"));
 });
 
-
 //refreshaccesstoken
 const refreshAccessToken = asyncHandler(async (req, res) => {
-  const incomingRefreshToken = req.cookies.refreshToken || req.body.refreshToken;
+  const incomingRefreshToken =
+    req.cookies.refreshToken || req.body.refreshToken;
 
   if (!incomingRefreshToken) {
     return res.status(420).json(new ApiError(420, "Unauthorized request"));
   }
 
   try {
-    const decodedToken = jwt.verify(incomingRefreshToken, process.env.REFRESH_TOKEN_SECRET);
+    const decodedToken = jwt.verify(
+      incomingRefreshToken,
+      process.env.REFRESH_TOKEN_SECRET
+    );
 
     // Determine roleId from token or from request if you store it in token
     const roleId = decodedToken?.roleId || 1; // fallback to 1 (User) if not present
@@ -469,24 +549,35 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
     }
 
     if (incomingRefreshToken !== user?.refreshToken) {
-      return res.status(420).json(new ApiError(420, "Refresh token is expired or used"));
+      return res
+        .status(420)
+        .json(new ApiError(420, "Refresh token is expired or used"));
     }
 
     const options = { httpOnly: true, secure: true };
 
-    const { accessToken, refreshToken } = await generateAccessAndRefereshTokens(user._id, roleId);
+    const { accessToken, refreshToken } = await generateAccessAndRefereshTokens(
+      user._id,
+      roleId
+    );
 
     return res
       .status(200)
       .cookie("accessToken", accessToken, options)
       .cookie("refreshToken", refreshToken, options)
-      .json(new ApiResponse(200, { accessToken, refreshToken }, "Access token refreshed"));
+      .json(
+        new ApiResponse(
+          200,
+          { accessToken, refreshToken },
+          "Access token refreshed"
+        )
+      );
   } catch (error) {
-    return res.status(420).json(new ApiError(420, error?.message || "Invalid refresh token"));
+    return res
+      .status(420)
+      .json(new ApiError(420, error?.message || "Invalid refresh token"));
   }
 });
-
-
 
 //changecurrentpassword
 const changeCurrentPassword = asyncHandler(async (req, res) => {
@@ -525,14 +616,12 @@ const changeCurrentPassword = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, {}, "Password changed successfully"));
 });
 
-
 //getcurrentUser
 const getCurrentUser = asyncHandler(async (req, res) => {
   return res
     .status(200)
     .json(new ApiResponse(200, req.user, "User fetched successfully"));
 });
-
 
 //updateaccountdetails
 const updateAccountDetails = asyncHandler(async (req, res) => {
@@ -600,7 +689,6 @@ const updateAccountDetails = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, user, "Account details updated successfully"));
 });
 
-
 //updatecoverimage
 const updateCoverImage = asyncHandler(async (req, res) => {
   const imageLocalPath = req.file?.path;
@@ -644,7 +732,6 @@ const updateCoverImage = asyncHandler(async (req, res) => {
     .status(200)
     .json(new ApiResponse(200, user, "Cover image updated successfully"));
 });
-
 
 //genrateotp
 const generateOTP = asyncHandler(async (req, res) => {
@@ -705,7 +792,6 @@ const generateOTP = asyncHandler(async (req, res) => {
   return res.status(200).json(new ApiResponse(200, "OTP sent successfully"));
 });
 
-
 //verifyOtp
 const verifyOTP = asyncHandler(async (req, res) => {
   console.log("verify otp Req.body", req.body);
@@ -738,36 +824,34 @@ const verifyOTP = asyncHandler(async (req, res) => {
   return res.status(200).json(new ApiResponse(200, "OTP verified"));
 });
 
-
 //resetpassword
-const resetPassword = asyncHandler(async (req, res) => {
-  console.log("reset password Req.body", req.body);
-  const { emailOrPhone, newPassword } = req.body;
+// const resetPassword = asyncHandler(async (req, res) => {
+//   console.log("reset password Req.body", req.body);
+//   const { emailOrPhone, newPassword } = req.body;
 
-  if (!emailOrPhone || !newPassword) {
-    return res
-      .status(400)
-      .json(new ApiError(400, "email and new password is required"));
-  }
+//   if (!emailOrPhone || !newPassword) {
+//     return res
+//       .status(400)
+//       .json(new ApiError(400, "email and new password is required"));
+//   }
 
-  let user;
-  if (emailOrPhone.includes("@")) {
-    user = await User.findOne({ email: emailOrPhone });
-  } else {
-    user = await User.findOne({ phone_number: emailOrPhone });
-  }
+//   let user;
+//   if (emailOrPhone.includes("@")) {
+//     user = await User.findOne({ email: emailOrPhone });
+//   } else {
+//     user = await User.findOne({ phone_number: emailOrPhone });
+//   }
 
-  if (!user) {
-    return res.status(404).json(new ApiError(404, "User not found"));
-  }
-  user.password = newPassword;
-  await user.save();
+//   if (!user) {
+//     return res.status(404).json(new ApiError(404, "User not found"));
+//   }
+//   user.password = newPassword;
+//   await user.save();
 
-  return res
-    .status(200)
-    .json(new ApiResponse(200, "Password reset successfully"));
-});
-
+//   return res
+//     .status(200)
+//     .json(new ApiResponse(200, "Password reset successfully"));
+// });
 
 //createFCMtoken
 const createFCMToken = asyncHandler(async (req, res) => {
@@ -827,6 +911,84 @@ const createFCMToken = asyncHandler(async (req, res) => {
   }
 });
 
+const requestPasswordReset = asyncHandler(async (req, res) => {
+  const { email } = req.body;
+
+  const user = await User.findOne({ email });
+  if (!user) {
+    return res.status(404).json({ message: "User not found" });
+  }
+
+  // Generate JWT reset token
+  const resetToken = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
+    expiresIn: "15m",
+  });
+
+  // Save token and expiry in user document
+  user.resetPasswordToken = resetToken;
+  user.resetPasswordExpires = Date.now() + 15 * 60 * 1000; // 15 minutes
+  await user.save();
+
+  const resetLink = `http://localhost:8080/reset-password?token=${resetToken}`;
+
+  const emailHtml = `
+    <p>Dear ${user.name || "User"},</p>
+    <p>You requested a password reset. Click the button below:</p>
+    <a href="${resetLink}" 
+       style="display:inline-block;padding:10px 20px;background:#007bff;color:white;text-decoration:none;border-radius:5px;">
+       Reset Password
+    </a>
+    <p>If you didn’t request this, please ignore this email.</p>
+  `;
+
+  await sendEmail({
+    to: user.email,
+    subject: "Reset Your Password",
+    text: `Reset your password using this link: ${resetLink}`,
+    html: emailHtml,
+  });
+
+  res.status(200).json({ message: "Password reset email sent" });
+});
+
+const resetPassword = asyncHandler(async (req, res) => {    
+  const { token, newPassword } = req.body;
+
+  const user = await User.findOne({
+    resetPasswordToken: token,
+    resetPasswordExpires: { $gt: Date.now() },
+  });
+
+  if (!user) {
+    return res.status(400).json({ message: "Invalid or expired token" });
+  }
+
+  // Assign new password — pre("save") will hash it
+  user.password = newPassword;
+
+  // Invalidate reset token
+  user.resetPasswordToken = undefined;
+  user.resetPasswordExpires = undefined;
+
+  await user.save();
+
+  // Generate fresh tokens
+  const accessToken = user.generateAccessToken();
+  const refreshToken = user.generateRefreshToken();
+
+  res
+    .status(200)
+    .cookie("accessToken", accessToken, { httpOnly: true, secure: true })
+    .cookie("refreshToken", refreshToken, { httpOnly: true, secure: true })
+    .json({
+      message: "Password has been reset successfully",
+      accessToken,
+      refreshToken,
+    });
+});
+
+
+
 export {
   registerUser,
   loginUser,
@@ -838,7 +1000,8 @@ export {
   updateCoverImage,
   generateOTP,
   verifyOTP,
-  resetPassword,
   createFCMToken,
   checkEmail,
+  resetPassword,
+  requestPasswordReset,
 };

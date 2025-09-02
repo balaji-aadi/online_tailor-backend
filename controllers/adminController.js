@@ -1,20 +1,20 @@
-import Dispute from '../models/Dispute.js';
-import nodemailer from 'nodemailer';
-import * as analyticsService from '../services/analyticsService.js';
-import * as notificationService from '../services/notificationService.js';
-import csv from 'csvtojson';
-import XLSX from 'xlsx';
-import logger from '../utils/logger.js';
-import path from 'path';
-import fs from 'fs';
-import mongoose from 'mongoose';
-import  User  from '../models/User.js';
-import Notification from '../models/Notification.js';
-import { asyncHandler } from '../utils/asyncHandler.js';
-import { ApiResponse } from '../utils/ApiResponse.js';
-import { UserRole } from '../models/userRole.js';
-import { sendEmail } from '../utils/emails/sendEmail.js';
-
+import Dispute from "../models/Dispute.js";
+import nodemailer from "nodemailer";
+import * as analyticsService from "../services/analyticsService.js";
+import * as notificationService from "../services/notificationService.js";
+import csv from "csvtojson";
+import XLSX from "xlsx";
+import logger from "../utils/logger.js";
+import path from "path";
+import fs from "fs";
+import mongoose from "mongoose";
+import User from "../models/User.js";
+import Notification from "../models/Notification.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
+import { ApiResponse } from "../utils/ApiResponse.js";
+import { UserRole } from "../models/userRole.js";
+import { sendEmail } from "../utils/emails/sendEmail.js";
+import { TermsPolicy } from "../models/Master.js";
 
 // List users with optional role filter, search, pagination
 const getAllUsers = asyncHandler(async (req, res) => {
@@ -40,18 +40,27 @@ const getAllUsers = asyncHandler(async (req, res) => {
   ]);
 
   // Ensure ObjectId
-const adminRoleId = adminRole?._id ? new mongoose.Types.ObjectId(adminRole._id) : null;
-const tailorRoleId = tailorRole?._id ? new mongoose.Types.ObjectId(tailorRole._id) : null;
-const customerRoleId = customerRole?._id ? new mongoose.Types.ObjectId(customerRole._id) : null;
+  const adminRoleId = adminRole?._id
+    ? new mongoose.Types.ObjectId(adminRole._id)
+    : null;
+  const tailorRoleId = tailorRole?._id
+    ? new mongoose.Types.ObjectId(tailorRole._id)
+    : null;
+  const customerRoleId = customerRole?._id
+    ? new mongoose.Types.ObjectId(customerRole._id)
+    : null;
 
-if (city) query.city = new mongoose.Types.ObjectId(city);
+  if (city) query.city = new mongoose.Types.ObjectId(city);
 
   // Build query
   const query = {};
   if (adminRoleId) query.user_role = { $ne: adminRoleId };
   if (role === "tailor" && tailorRoleId) query.user_role = tailorRoleId;
   if (role === "customer" && customerRoleId) query.user_role = customerRoleId;
-  if (status && ["pending", "approved", "rejected"].includes(status.toLowerCase()))
+  if (
+    status &&
+    ["pending", "approved", "rejected"].includes(status.toLowerCase())
+  )
     query["tailorInfo.status"] = status.toLowerCase();
   if (gender && ["male", "female", "others"].includes(gender.toLowerCase()))
     query["tailorInfo.professionalInfo.gender"] = gender.toLowerCase();
@@ -78,9 +87,13 @@ if (city) query.city = new mongoose.Types.ObjectId(city);
     .limit(limitNum);
 
   // Fetch counts
-  const totalUsers = await User.countDocuments({ user_role: { $ne: adminRoleId } });
+  const totalUsers = await User.countDocuments({
+    user_role: { $ne: adminRoleId },
+  });
   const totalTailors = await User.countDocuments({ user_role: tailorRoleId });
-  const totalCustomers = await User.countDocuments({ user_role: customerRoleId });
+  const totalCustomers = await User.countDocuments({
+    user_role: customerRoleId,
+  });
   const pendingTailors = await User.countDocuments({
     user_role: tailorRoleId,
     "tailorInfo.status": "pending",
@@ -95,40 +108,41 @@ if (city) query.city = new mongoose.Types.ObjectId(city);
   });
 
   res.status(200).json(
-    new ApiResponse(200, users, `${role ? role : "Users"} fetched successfully`, {
-      page: pageNum,
-      limit: limitNum,
-      totalPages: Math.ceil(totalUsers / limitNum),
-      totalUsers,
-      totalTailors,
-      totalCustomers,
-      pendingTailors,
-      approvedTailors,
-      rejectedTailors,
-    })
+    new ApiResponse(
+      200,
+      users,
+      `${role ? role : "Users"} fetched successfully`,
+      {
+        page: pageNum,
+        limit: limitNum,
+        totalPages: Math.ceil(totalUsers / limitNum),
+        totalUsers,
+        totalTailors,
+        totalCustomers,
+        pendingTailors,
+        approvedTailors,
+        rejectedTailors,
+      }
+    )
   );
 });
-
-
-
-
 
 // User verification and approval workflows
 const verifyUser = async (req, res, next) => {
   try {
     const { userId, documents } = req.body;
     if (!mongoose.Types.ObjectId.isValid(userId)) {
-      return res.status(400).json({ message: 'Invalid userId' });
+      return res.status(400).json({ message: "Invalid userId" });
     }
     const user = await User.findById(userId);
-    if (!user) return res.status(404).json({ message: 'User not found' });
+    if (!user) return res.status(404).json({ message: "User not found" });
 
     user.isVerified = true;
     user.verifiedAt = new Date();
     user.documents = documents;
     await user.save();
 
-    res.status(200).json({ message: 'User verified successfully' });
+    res.status(200).json({ message: "User verified successfully" });
   } catch (error) {
     next(error);
   }
@@ -138,16 +152,20 @@ const approveUser = async (req, res, next) => {
   try {
     const { userId, approvalStatus } = req.body;
     if (!mongoose.Types.ObjectId.isValid(userId)) {
-      return res.status(400).json({ message: 'Invalid userId' });
+      return res.status(400).json({ message: "Invalid userId" });
     }
     const user = await User.findById(userId);
-    if (!user) return res.status(404).json({ message: 'User not found' });
+    if (!user) return res.status(404).json({ message: "User not found" });
 
     user.isApproved = approvalStatus;
     user.approvedAt = approvalStatus ? new Date() : null;
     await user.save();
 
-    res.status(200).json({ message: `User ${approvalStatus ? 'approved' : 'disapproved'} successfully` });
+    res.status(200).json({
+      message: `User ${
+        approvalStatus ? "approved" : "disapproved"
+      } successfully`,
+    });
   } catch (error) {
     next(error);
   }
@@ -158,16 +176,18 @@ const updateUserRole = async (req, res, next) => {
     const { userId } = req.params;
     const { roles } = req.body;
     if (!mongoose.Types.ObjectId.isValid(userId)) {
-      return res.status(400).json({ message: 'Invalid userId' });
+      return res.status(400).json({ message: "Invalid userId" });
     }
     if (!Array.isArray(roles) || roles.length === 0) {
-      return res.status(400).json({ message: 'Roles must be a non-empty array' });
+      return res
+        .status(400)
+        .json({ message: "Roles must be a non-empty array" });
     }
     const user = await User.findById(userId);
-    if (!user) return res.status(404).json({ message: 'User not found' });
+    if (!user) return res.status(404).json({ message: "User not found" });
 
     user.auditTrail.push({
-      action: 'Role update',
+      action: "Role update",
       by: req.user._id,
       previousRoles: user.roles,
       newRoles: roles,
@@ -177,7 +197,7 @@ const updateUserRole = async (req, res, next) => {
 
     await user.save();
 
-    res.status(200).json({ message: 'User roles updated successfully' });
+    res.status(200).json({ message: "User roles updated successfully" });
   } catch (error) {
     next(error);
   }
@@ -186,29 +206,30 @@ const updateUserRole = async (req, res, next) => {
 const bulkImportUsers = async (req, res, next) => {
   try {
     if (!req.files || req.files.length === 0) {
-      return res.status(400).json({ message: 'No files uploaded' });
+      return res.status(400).json({ message: "No files uploaded" });
     }
 
     const file = req.files[0];
     let usersData = [];
 
-    if (file.mimetype === 'text/csv' || file.originalname.endsWith('.csv')) {
+    if (file.mimetype === "text/csv" || file.originalname.endsWith(".csv")) {
       usersData = await csv().fromFile(file.path);
     } else if (
-      file.mimetype === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
-      file.originalname.endsWith('.xlsx')
+      file.mimetype ===
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+      file.originalname.endsWith(".xlsx")
     ) {
       const workbook = XLSX.readFile(file.path);
       const sheetName = workbook.SheetNames[0];
       usersData = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
     } else {
-      return res.status(400).json({ message: 'Unsupported file format' });
+      return res.status(400).json({ message: "Unsupported file format" });
     }
 
     const userDocs = usersData.map((user) => ({
       email: user.email,
       password: user.password || null,
-      roles: user.roles ? user.roles.split(',') : ['customer'],
+      roles: user.roles ? user.roles.split(",") : ["customer"],
       isVerified: false,
       isApproved: false,
     }));
@@ -216,7 +237,9 @@ const bulkImportUsers = async (req, res, next) => {
     await User.insertMany(userDocs);
     fs.unlinkSync(file.path);
 
-    res.status(201).json({ message: `${userDocs.length} users imported successfully` });
+    res
+      .status(201)
+      .json({ message: `${userDocs.length} users imported successfully` });
   } catch (error) {
     next(error);
   }
@@ -224,17 +247,24 @@ const bulkImportUsers = async (req, res, next) => {
 
 const bulkExportUsers = async (req, res, next) => {
   try {
-    const users = await User.find().select('email roles isVerified isApproved createdAt').lean();
-    const headers = 'email,roles,isVerified,isApproved,createdAt\n';
+    const users = await User.find()
+      .select("email roles isVerified isApproved createdAt")
+      .lean();
+    const headers = "email,roles,isVerified,isApproved,createdAt\n";
     const csvRows = users
       .map(
         (user) =>
-          `${user.email},"${user.roles.join('|')}",${user.isVerified},${user.isApproved},${user.createdAt.toISOString()}`
+          `${user.email},"${user.roles.join("|")}",${user.isVerified},${
+            user.isApproved
+          },${user.createdAt.toISOString()}`
       )
-      .join('\n');
+      .join("\n");
 
-    res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', 'attachment; filename=users_export.csv');
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader(
+      "Content-Disposition",
+      "attachment; filename=users_export.csv"
+    );
     res.send(headers + csvRows);
   } catch (error) {
     next(error);
@@ -247,9 +277,11 @@ const broadcastNotifications = async (req, res, next) => {
 
     let users;
     if (targetUserIds && targetUserIds.length > 0) {
-      users = await User.find({ _id: { $in: targetUserIds } }).select('_id email').lean();
+      users = await User.find({ _id: { $in: targetUserIds } })
+        .select("_id email")
+        .lean();
     } else {
-      users = await User.find().select('_id email').lean();
+      users = await User.find().select("_id email").lean();
     }
 
     const notifications = users.map((u) => ({
@@ -262,9 +294,13 @@ const broadcastNotifications = async (req, res, next) => {
     }));
 
     await Notification.insertMany(notifications);
-    notificationService.sendBulkNotifications(notifications).catch((err) => logger.error(err));
+    notificationService
+      .sendBulkNotifications(notifications)
+      .catch((err) => logger.error(err));
 
-    res.status(200).json({ message: 'Broadcast notifications queued for delivery' });
+    res
+      .status(200)
+      .json({ message: "Broadcast notifications queued for delivery" });
   } catch (error) {
     next(error);
   }
@@ -274,10 +310,10 @@ const blacklistUser = async (req, res, next) => {
   try {
     const { userId, reason, expiryDate } = req.body;
     if (!mongoose.Types.ObjectId.isValid(userId)) {
-      return res.status(400).json({ message: 'Invalid userId' });
+      return res.status(400).json({ message: "Invalid userId" });
     }
     const user = await User.findById(userId);
-    if (!user) return res.status(404).json({ message: 'User not found' });
+    if (!user) return res.status(404).json({ message: "User not found" });
 
     user.blacklist = {
       isBlacklisted: true,
@@ -286,7 +322,7 @@ const blacklistUser = async (req, res, next) => {
     };
     await user.save();
 
-    res.status(200).json({ message: 'User blacklisted successfully' });
+    res.status(200).json({ message: "User blacklisted successfully" });
   } catch (error) {
     next(error);
   }
@@ -296,10 +332,10 @@ const whitelistUser = async (req, res, next) => {
   try {
     const { userId, reason, expiryDate } = req.body;
     if (!mongoose.Types.ObjectId.isValid(userId)) {
-      return res.status(400).json({ message: 'Invalid userId' });
+      return res.status(400).json({ message: "Invalid userId" });
     }
     const user = await User.findById(userId);
-    if (!user) return res.status(404).json({ message: 'User not found' });
+    if (!user) return res.status(404).json({ message: "User not found" });
 
     user.whitelist = {
       isWhitelisted: true,
@@ -308,7 +344,7 @@ const whitelistUser = async (req, res, next) => {
     };
     await user.save();
 
-    res.status(200).json({ message: 'User whitelisted successfully' });
+    res.status(200).json({ message: "User whitelisted successfully" });
   } catch (error) {
     next(error);
   }
@@ -379,7 +415,7 @@ const initiateDispute = async (req, res, next) => {
     const { orderId, evidence, description } = req.body;
     const dispute = await Dispute.create({
       orderId,
-      status: 'open',
+      status: "open",
       evidence,
       description,
       createdAt: new Date(),
@@ -387,7 +423,9 @@ const initiateDispute = async (req, res, next) => {
       communicationChannel: [],
     });
 
-    res.status(201).json({ message: 'Dispute initiated', disputeId: dispute._id });
+    res
+      .status(201)
+      .json({ message: "Dispute initiated", disputeId: dispute._id });
   } catch (error) {
     next(error);
   }
@@ -398,7 +436,7 @@ const mediateDispute = async (req, res, next) => {
     const { disputeId } = req.params;
     const { resolution, communication } = req.body;
     const dispute = await Dispute.findById(disputeId);
-    if (!dispute) return res.status(404).json({ message: 'Dispute not found' });
+    if (!dispute) return res.status(404).json({ message: "Dispute not found" });
 
     dispute.status = resolution.status || dispute.status;
     dispute.resolutionDetails = resolution.details || dispute.resolutionDetails;
@@ -406,7 +444,7 @@ const mediateDispute = async (req, res, next) => {
     dispute.updatedAt = new Date();
 
     await dispute.save();
-    res.json({ message: 'Dispute updated', dispute });
+    res.json({ message: "Dispute updated", dispute });
   } catch (error) {
     next(error);
   }
@@ -416,7 +454,7 @@ const getDisputeDetails = async (req, res, next) => {
   try {
     const { disputeId } = req.params;
     const dispute = await Dispute.findById(disputeId).lean();
-    if (!dispute) return res.status(404).json({ message: 'Dispute not found' });
+    if (!dispute) return res.status(404).json({ message: "Dispute not found" });
 
     res.json(dispute);
   } catch (error) {
@@ -484,18 +522,17 @@ const getDisputeDetails = async (req, res, next) => {
 //     await Content.findByIdAndDelete(contentId);
 //     res.json({ message: 'Content deleted' });
 //   } catch (error) {
-//     next(error); 
+//     next(error);
 //   }
 // };
 
-
 const verifyTailorAccount = async (req, res, next) => {
   try {
-    const { 
-      userId, 
-      action = "approve", 
-      generateTempPassword = false, 
-      reason = ""   // ✅ Unified field for both reject & activate
+    const {
+      userId,
+      action = "approve",
+      generateTempPassword = false,
+      reason = "", // ✅ Unified field for both reject & activate
     } = req.body;
 
     if (!mongoose.Types.ObjectId.isValid(userId)) {
@@ -503,14 +540,23 @@ const verifyTailorAccount = async (req, res, next) => {
     }
 
     const user = await User.findById(userId).populate("user_role");
+    console.log("user:", user.email);
     if (!user) return res.status(404).json({ message: "User not found" });
 
-    if (!user.user_role || !(user.user_role.role_id === 2 || /tailor/i.test(user.user_role.name || ""))) {
+    if (
+      !user.user_role ||
+      !(
+        user.user_role.role_id === 2 ||
+        /tailor/i.test(user.user_role.name || "")
+      )
+    ) {
       return res.status(400).json({ message: "User is not a tailor" });
     }
 
     if (!user.email) {
-      return res.status(400).json({ message: "User does not have a valid email" });
+      return res
+        .status(400)
+        .json({ message: "User does not have a valid email" });
     }
 
     user.tailorInfo = user.tailorInfo || {};
@@ -521,7 +567,9 @@ const verifyTailorAccount = async (req, res, next) => {
     switch (action) {
       case "approve":
         if (user.tailorInfo.status !== "pending") {
-          return res.status(400).json({ message: "Cannot approve a non-pending tailor" });
+          return res
+            .status(400)
+            .json({ message: "Cannot approve a non-pending tailor" });
         }
         user.tailorInfo.status = "approved";
         user.status = "Approved";
@@ -549,7 +597,9 @@ const verifyTailorAccount = async (req, res, next) => {
 
       case "reject":
         if (user.tailorInfo.status !== "pending") {
-          return res.status(400).json({ message: "Cannot reject a non-pending tailor" });
+          return res
+            .status(400)
+            .json({ message: "Cannot reject a non-pending tailor" });
         }
         user.tailorInfo.status = "rejected";
         user.status = "Rejected";
@@ -566,22 +616,26 @@ const verifyTailorAccount = async (req, res, next) => {
 
       case "deactivate":
         if (user.tailorInfo.status !== "approved") {
-          return res.status(400).json({ message: "Only approved tailors can be deactivated" });
+          return res
+            .status(400)
+            .json({ message: "Only approved tailors can be deactivated" });
         }
         user.tailorInfo.status = "deactivated";
         user.status = "Deactivated";
 
         emailSubject = "Your Tailor Account Has Been Deactivated";
         emailHtml = `
-          <p>Dear Tailor,</p>
-          <p>Your account has been <strong>deactivated</strong> by the admin.</p>
-          <p>If you have any questions, please contact support.</p>
+          Dear Tailor,
+          Your account has been deactivated by the admin for ${user.tailorInfo.reason}.
+          If you have any questions, please contact support.
         `;
         break;
 
       case "activate":
         if (user.tailorInfo.status !== "deactivated") {
-          return res.status(400).json({ message: "Only deactivated tailors can be activated" });
+          return res
+            .status(400)
+            .json({ message: "Only deactivated tailors can be activated" });
         }
         user.tailorInfo.status = "approved";
         user.status = "Approved";
@@ -589,19 +643,27 @@ const verifyTailorAccount = async (req, res, next) => {
 
         emailSubject = "Your Tailor Account Has Been Reactivated";
         emailHtml = `
-          <p>Dear Tailor,</p>
-          <p>Your account has been <strong>reactivated</strong>. You may now log in again.</p>
-          <p><strong>Reason:</strong> ${user.tailorInfo.reason}</p>
-          <p>Thank you for being with us.</p>
+          Dear Tailor,
+          Your account has been reactivated. You may now log in again.
+          Reason: ${user.tailorInfo.reason}
+          Thank you for being with us.
         `;
         break;
 
       default:
-        return res.status(400).json({ message: "Invalid action. Must be 'approve', 'reject', 'deactivate', or 'activate'." });
+        return res.status(400).json({
+          message:
+            "Invalid action. Must be 'approve', 'reject', 'deactivate', or 'activate'.",
+        });
     }
 
     await user.save();
-    await sendEmail(user.email, emailSubject, emailHtml);
+    await sendEmail({
+      to: user.email,
+      subject: emailSubject,
+      text: emailHtml.replace(/<[^>]+>/g, ""), // strip HTML for plain-text fallback
+      html: emailHtml,
+    });
 
     return res.status(200).json({
       message: `Tailor ${action} successfully and notified`,
@@ -611,7 +673,10 @@ const verifyTailorAccount = async (req, res, next) => {
       tempPassword: tempPassword || null,
     });
   } catch (error) {
-    console.error("Error verifying/rejecting/deactivating/activating tailor account:", error);
+    console.error(
+      "Error verifying/rejecting/deactivating/activating tailor account:",
+      error
+    );
     return next(error);
   }
 };
@@ -619,12 +684,10 @@ const verifyTailorAccount = async (req, res, next) => {
 
 
 
-
-
-
 // Export at bottom
 // New (ESM)
 export {
+
   getAllUsers,
   verifyTailorAccount,
   verifyUser,
@@ -642,9 +705,5 @@ export {
   getBusinessIntelligence,
   initiateDispute,
   mediateDispute,
-  getDisputeDetails
+  getDisputeDetails,
 };
-
-
-
-

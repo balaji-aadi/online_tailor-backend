@@ -36,6 +36,7 @@ router.get("/orders/:orderId/status", customerController.getOrderStatus);
 router.post("/orders/:orderId/photo-update",multer.uploadSingle("progressPhoto"),customerController.uploadProgressPhoto);
 
 /** Personal management */
+router.post("/customer-login", customerController.loginCustomer);
 router.get("/profile", customerController.getProfile);
 router.put("/profile", validateProfileUpdate, customerController.updateProfile);
 router.get("/family-profiles", customerController.listFamilyProfiles);

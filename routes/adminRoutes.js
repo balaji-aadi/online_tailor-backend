@@ -6,7 +6,7 @@ import {
   validateDisputeResolution,
   validateContentUpdate,
 } from "../validators/adminValidators.js";
-import { verifyJWT } from "../middleware/authMiddleware.js";
+import { verifyJWT ,adminOnly} from "../middleware/authMiddleware.js";
 import {
   approveUser,
   blacklistUser,
@@ -27,7 +27,6 @@ import {
   getGeographicDistribution,
   getRealTimeMetrics,
 } from "../services/analyticsService.js";
-import { adminOnly } from "../middleware/role.middleware.js";
 import { logoutUser } from "../controllers/authController.js";
 
 const router = express.Router();

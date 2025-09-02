@@ -19,9 +19,24 @@ const userSchema = new Schema(
 
     phone_number: { type: String, maxlength: 15 },
     address: { type: String, default: null },
-
+    coordinates: {
+      type: {
+        type: String,
+        enum: ["Point"],
+        default: "Point",
+        required: true,
+      },
+      coordinates: {
+        type: [Number], // [longitude, latitude]
+        default: undefined,
+      },
+    },
     // Tailor Info
     tailorInfo: {
+       coordinates: {
+    type: { type: String, enum: ["Point"], default: "Point" },
+    coordinates: { type: [Number], default: undefined }, // [lng, lat]
+  },
       businessInfo: {
         businessName: { type: String },
         ownerName: { type: String },
@@ -70,6 +85,9 @@ const userSchema = new Schema(
     is_active: { type: Boolean, default: true },
     password: { type: String, default: null },
     refreshToken: { type: String, default: null },
+    resetPasswordToken: { type: String, default: null }, 
+    resetPasswordExpires: { type: Date, default: null },
+    termsPrivacyAgree: { type: Boolean, default: false },
     status: {
       type: String,
       enum: [
@@ -89,7 +107,7 @@ const userSchema = new Schema(
     },
     country: { type: Schema.Types.ObjectId, ref: "Country", default: null },
     city: { type: Schema.Types.ObjectId, ref: "City", default: null },
-    reason: { type: String, default: null }
+    reason: { type: String, default: null },
     // location: { type: Schema.Types.ObjectId, ref: "Location", default: null },
   },
   { timestamps: true, versionKey: false }

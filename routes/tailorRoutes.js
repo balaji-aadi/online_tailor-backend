@@ -15,7 +15,13 @@ router.use(verifyJWT);
 
 
 
-
+/** ---------------- Readymade Cloths ---------------- */
+router.post("/create-service",verifyJWT,multer.uploadMultiple("image"), tailorController.createProductService);
+router.put("/update-service/:id",verifyJWT,multer.uploadMultiple("image"), tailorController.updateService);
+router.get("/get-service-byid/:id",verifyJWT, tailorController.getServiceById);
+router.delete("/delete-service/:id",verifyJWT, tailorController.deleteService);
+router.post("/get-all-service/:tailorId",verifyJWT, tailorController.getReadymadeClothsByTailor);
+router.post("/get-all-service",verifyJWT, tailorController.getAllServices);
 
 
 /** ---------------- Readymade Cloths ---------------- */

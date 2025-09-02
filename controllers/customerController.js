@@ -700,6 +700,7 @@ const shareOnSocialMedia = async (req, res, next) => {
 // Exports
 // =========================
 export {
+  loginCustomer,
   getCustomerById,
   getLoggedInCustomer,
   registerCustomer,

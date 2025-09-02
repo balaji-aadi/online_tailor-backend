@@ -11,7 +11,8 @@ import { checkEmail,
     verifyOTP,
     resetPassword,
     updateCoverImage,
-    createFCMToken, } from "../controllers/authController.js";
+    createFCMToken,
+    requestPasswordReset, } from "../controllers/authController.js";
 import { authenticateToken } from "../middleware/firebase.middleware.js";
 import { verifyJWT } from "../middleware/authMiddleware.js";
 import multer from "../middleware/multer.middleware.js";
@@ -26,6 +27,7 @@ router.route("/login/:role_id").post(authenticateToken, loginUser)
 router.route("/generate-otp").post(generateOTP)
 router.route("/verify-otp").post(verifyOTP)
 router.route("/reset-password").post(resetPassword)
+router.route("/request-password-reset").post(requestPasswordReset)
 
 //secured routes
 router.route("/logout").post(verifyJWT, logoutUser)

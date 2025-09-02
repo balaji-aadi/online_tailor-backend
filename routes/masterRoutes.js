@@ -55,9 +55,14 @@ import {
 } from "../controllers/masterController.js";
 import { adminOnly, verifyJWT } from "../middleware/authMiddleware.js";
 import multer from "../middleware/multer.middleware.js";
+import { createTermsPolicy, getAllTermsPolicies, getTermsPolicy, updateTermsPolicy } from "../controllers/masterController.js";
 
 const router = Router();
  
+router.post("/create-terms-policy",verifyJWT,  createTermsPolicy);
+router.put("/update-terms-policy/:id",verifyJWT, updateTermsPolicy);
+router.post("/get-terms-policy", getTermsPolicy);
+router.get("/get-all-terms-policy", getAllTermsPolicies);
   
 
 //Tax Master
@@ -68,8 +73,8 @@ router.route("/get-active-tax").get(verifyJWT, getActiveTax);
 router.delete("/delete-tax/:id",verifyJWT,adminOnly, deleteTax);
 
 //Category
-router.route("/create-category").post(verifyJWT,createCategory);
-router.route("/update-category/:id").put(verifyJWT,updateCategory);
+router.route("/create-category").post(verifyJWT,multer.uploadSingle("image"),createCategory);
+router.route("/update-category/:id").put(verifyJWT,multer.uploadSingle("image"),updateCategory);
 router.route("/get-all-categories").post(getCategories);
 router.route("/get-category-by-id/:id").get(verifyJWT, getCategoryById);
 router.delete("/delete-category/:id",verifyJWT, deleteCategory);

@@ -8,6 +8,7 @@ import LocationMaster, {
   MeasurementTemplate,
   Specialty,
   TaxMaster,
+  TermsPolicy,
 } from "../models/Master.js";
 import { UserRole } from "../models/userRole.js";
 import { ApiError } from "../utils/ApiError.js";
@@ -19,26 +20,36 @@ import specialties from "../utils/seeds/specialties.js";
 import predefinedMeasurements from "../utils/seeds/measurements.js";
 import { uploadOnCloudinary, deleteFromCloudinary } from "../cloudinary.js";
 
-
-
 // Create Tax
 const createTax = asyncHandler(async (req, res) => {
   const { taxName, value, isActive, valueType } = req.body;
 
   if (!taxName) throw new ApiError(400, "Tax name is required");
   if (value === undefined) throw new ApiError(400, "Tax value is required");
-  if (!valueType || !["percentage", "absolute"].includes(valueType.toLowerCase())) {
-    throw new ApiError(400, "Value type must be either 'percentage' or 'absolute'");
+  if (
+    !valueType ||
+    !["percentage", "absolute"].includes(valueType.toLowerCase())
+  ) {
+    throw new ApiError(
+      400,
+      "Value type must be either 'percentage' or 'absolute'"
+    );
   }
 
   // Check if tax with same name AND valueType already exists (case-insensitive)
   const existingTax = await TaxMaster.findOne({
     taxName: { $regex: new RegExp("^" + taxName + "$", "i") },
-    valueType: valueType.toLowerCase()
+    valueType: valueType.toLowerCase(),
   });
-  if (existingTax) throw new ApiError(400, "A tax with this name and type already exists");
+  if (existingTax)
+    throw new ApiError(400, "A tax with this name and type already exists");
 
-  const tax = await TaxMaster.create({ taxName, value, isActive, valueType: valueType.toLowerCase() });
+  const tax = await TaxMaster.create({
+    taxName,
+    value,
+    isActive,
+    valueType: valueType.toLowerCase(),
+  });
 
   // If this tax is active, deactivate all other taxes
   if (isActive) {
@@ -59,7 +70,8 @@ const updateTax = asyncHandler(async (req, res) => {
 
   if (taxName) tax.taxName = taxName;
   if (value !== undefined) tax.value = value;
-  if (valueType && ["percentage", "absolute"].includes(valueType.toLowerCase())) tax.valueType = valueType;
+  if (valueType && ["percentage", "absolute"].includes(valueType.toLowerCase()))
+    tax.valueType = valueType;
   if (isActive !== undefined) tax.isActive = isActive;
 
   // If this tax is set active, deactivate all other taxes
@@ -76,7 +88,9 @@ const updateTax = asyncHandler(async (req, res) => {
 // Get all taxes
 const getTaxes = asyncHandler(async (req, res) => {
   const taxes = await TaxMaster.find().sort({ createdAt: -1 });
-  return res.status(200).json(new ApiResponse(200, taxes, "Taxes fetched successfully"));
+  return res
+    .status(200)
+    .json(new ApiResponse(200, taxes, "Taxes fetched successfully"));
 });
 // Delete Tax
 const deleteTax = asyncHandler(async (req, res) => {
@@ -88,7 +102,10 @@ const deleteTax = asyncHandler(async (req, res) => {
 
   // Prevent deletion if active
   if (tax.isActive) {
-    throw new ApiError(400, "Cannot delete an active tax. Deactivate it first.");
+    throw new ApiError(
+      400,
+      "Cannot delete an active tax. Deactivate it first."
+    );
   }
 
   // Now safely delete
@@ -99,14 +116,17 @@ const deleteTax = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, null, "Tax deleted successfully"));
 });
 
-
 const getActiveTax = asyncHandler(async (req, res) => {
   const tax = await TaxMaster.findOne({ isActive: true });
-  if (!tax) return res.status(404).json(new ApiResponse(404, null, "No active tax found"));
+  if (!tax)
+    return res
+      .status(404)
+      .json(new ApiResponse(404, null, "No active tax found"));
 
-  return res.status(200).json(new ApiResponse(200, tax, "Active tax fetched successfully"));
+  return res
+    .status(200)
+    .json(new ApiResponse(200, tax, "Active tax fetched successfully"));
 });
-
 
 const createCategory = asyncHandler(async (req, res) => {
   const { name, description } = req.body;
@@ -120,16 +140,16 @@ const createCategory = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Category with this name already exists");
   }
 
-  // let imageUrl = "";
-  // if (req.file) {
-  //   const upload = await uploadOnCloudinary(req.file.path);
-  //   if (upload?.secure_url) imageUrl = upload.secure_url;
-  // }
+  let imageUrl = "";
+  if (req.file) {
+    const upload = await uploadOnCloudinary(req.file.path);
+    if (upload?.secure_url) imageUrl = upload.secure_url;
+  }
 
   const category = await Category.create({
     name,
     description,
-    // image: imageUrl,
+    image: imageUrl,
   });
   return res
     .status(201)
@@ -146,10 +166,10 @@ const updateCategory = asyncHandler(async (req, res) => {
   if (name) category.name = name;
   if (description) category.description = description;
 
-  // if (req.file) {
-  //   const upload = await uploadOnCloudinary(req.file.path);
-  //   if (upload?.secure_url) category.image = upload.secure_url;
-  // }
+  if (req.file) {
+    const upload = await uploadOnCloudinary(req.file.path);
+    if (upload?.secure_url) category.image = upload.secure_url;
+  }
 
   await category.save();
   return res
@@ -184,10 +204,7 @@ const deleteCategory = asyncHandler(async (req, res) => {
 });
 
 const createMeasurementTemplate = asyncHandler(async (req, res) => {
-  let { name, garmentType, description, measurementPoints } = req.body;
-
-  console.log("name:", name);
-  console.log("measurementPoints (raw):", measurementPoints);
+  let { name, garmentType, description, measurementPoints, gender } = req.body;
 
   if (!name || !garmentType || !measurementPoints) {
     throw new ApiError(
@@ -196,7 +213,7 @@ const createMeasurementTemplate = asyncHandler(async (req, res) => {
     );
   }
 
-  // ✅ Parse if stringified JSON
+  // Parse measurementPoints if sent as string
   if (typeof measurementPoints === "string") {
     try {
       measurementPoints = JSON.parse(measurementPoints);
@@ -208,11 +225,11 @@ const createMeasurementTemplate = asyncHandler(async (req, res) => {
     }
   }
 
-  // ✅ Check if garmentType exists
+  // Validate garmentType
   const specialty = await Specialty.findById(garmentType);
   if (!specialty) throw new ApiError(404, "Garment type not found");
 
-  // ✅ Handle images upload
+  // Handle images upload
   let images = [];
   if (req.files && req.files.length > 0) {
     for (const file of req.files) {
@@ -221,13 +238,14 @@ const createMeasurementTemplate = asyncHandler(async (req, res) => {
     }
   }
 
-  // ✅ Save to DB
+  // Save to DB
   const template = await MeasurementTemplate.create({
     name,
     garmentType,
     description,
     image: images,
     measurementPoints,
+    gender, // add gender here
   });
 
   return res
@@ -244,8 +262,8 @@ const createMeasurementTemplate = asyncHandler(async (req, res) => {
 // ---------------- Update Template ----------------
 const updateMeasurementTemplate = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  let { name, garmentType, description, measurementPoints } = req.body;
-
+  let { name, garmentType, description, measurementPoints, gender } = req.body;
+  //  console.log("req.body:",req.body)
   if (!mongoose.Types.ObjectId.isValid(id)) {
     throw new ApiError(400, "Invalid ID");
   }
@@ -261,6 +279,7 @@ const updateMeasurementTemplate = asyncHandler(async (req, res) => {
 
   if (name) template.name = name;
   if (description) template.description = description;
+  if (gender) template.gender = gender; // update gender if provided
 
   if (measurementPoints) {
     if (typeof measurementPoints === "string") {
@@ -1184,7 +1203,7 @@ const createSpecialties = asyncHandler(async (req, res) => {
 
 // Create a single specialty
 const createSpecialty = asyncHandler(async (req, res) => {
-  const { name } = req.body;
+  const { name, gender } = req.body;
 
   if (!name) throw new ApiError(400, "Specialty name is required");
 
@@ -1203,7 +1222,7 @@ const createSpecialty = asyncHandler(async (req, res) => {
     ? await uploadOnCloudinary(req.file.path).then((u) => u?.secure_url)
     : "";
 
-  const specialty = await Specialty.create({ name, image });
+  const specialty = await Specialty.create({ name, image, gender });
 
   return res
     .status(201)
@@ -1213,7 +1232,7 @@ const createSpecialty = asyncHandler(async (req, res) => {
 // Update specialty by ID
 const updateSpecialty = asyncHandler(async (req, res) => {
   const { specialtyId } = req.params;
-  const { name } = req.body;
+  const { name, gender } = req.body;
 
   if (!mongoose.Types.ObjectId.isValid(specialtyId)) {
     return res
@@ -1242,6 +1261,9 @@ const updateSpecialty = asyncHandler(async (req, res) => {
     }
     specialty.name = name;
   }
+
+  // Update gender if provided
+  if (gender) specialty.gender = gender;
 
   // Image update
   if (req.file) {
@@ -1313,38 +1335,118 @@ const deleteAllSpecialties = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, null, "All specialties deleted successfully"));
 });
 
+const createTermsPolicy = asyncHandler(async (req, res) => {
+  const { userType, contentType, content } = req.body;
+  // console.log("req.body:", req.body);
+  if (!userType || !contentType || !content)
+    return res.status(400).json({ message: "All fields are required" });
+
+  // Check if combination already exists
+  const existing = await TermsPolicy.findOne({ userType, contentType });
+  if (existing) {
+    return res.status(400).json({
+      message: `${contentType} for ${userType} already exists, use update`,
+    });
+  }
+
+  const termsPolicy = await TermsPolicy.create({
+    userType,
+    contentType,
+    content,
+  });
+  res.status(201).json({ message: "Created successfully", data: termsPolicy });
+});
+
+const updateTermsPolicy = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { content } = req.body;
+  // console.log("req.body:", req.body);
+  if (!content) {
+    return res.status(400).json({ message: "Content is required" });
+  }
+
+  const termsPolicy = await TermsPolicy.findById(id);
+  if (!termsPolicy) {
+    return res
+      .status(404)
+      .json({ message: `TermsPolicy with id ${id} not found` });
+  }
+
+  termsPolicy.content = content;
+  await termsPolicy.save();
+
+  res.status(200).json({ message: "Updated successfully", data: termsPolicy });
+});
+
+const getTermsPolicy = asyncHandler(async (req, res) => {
+  const { userType, contentType } = req.body;
+
+  // Build query dynamically
+  const query = {};
+  if (userType) query.userType = userType;
+  if (contentType) query.contentType = contentType;
+
+  const termsPolicies = await TermsPolicy.find(query);
+
+  if (!termsPolicies || termsPolicies.length === 0) {
+    return res.status(200).json({
+      message:
+        userType && contentType
+          ? `No ${contentType} found for ${userType}`
+          : "No matching terms or privacy policies found",
+      data: [],
+    });
+  }
+
+  res.status(200).json({ data: termsPolicies });
+});
+
+
+const getAllTermsPolicies = asyncHandler(async (req, res) => {
+  const all = await TermsPolicy.find();
+
+  if (!all || all.length === 0) {
+    return res.status(200).json({
+      message: "No terms or privacy policies found",
+      data: [],
+    });
+  }
+
+  res.status(200).json({ data: all });
+});
+
 export {
+  createTermsPolicy,
+  updateTermsPolicy,
+  getTermsPolicy,
+  getAllTermsPolicies,
+
   createTax,
   updateTax,
   getTaxes,
   deleteTax,
-  getActiveTax, 
-
+  getActiveTax,
   createCategory,
   updateCategory,
   getCategories,
   getCategoryById,
   deleteCategory,
-
   createMeasurementTemplate,
   getAllMeasurementTemplates,
   getMeasurementTemplateById,
   updateMeasurementTemplate,
   deleteMeasurementTemplate,
-
   createMeasurements,
   createMeasurement,
   getAllMeasurements,
   getMeasurementById,
   updateMeasurement,
   deleteMeasurement,
-
   createFabric,
   updateFabricStatus,
   updateFabric,
   getAllFabric,
   deleteFabric,
-
   createSpecialties,
   createSpecialty,
   updateSpecialty,
@@ -1352,24 +1454,20 @@ export {
   getSpecialtyById,
   deleteSpecialty,
   deleteAllSpecialties,
-
   createRole,
   updateRole,
   getAllRole,
   getRoleById,
   getAllActiveRole,
-
   createLocation,
   getLocations,
   updateLocation,
   deleteLocation,
-
   createCountry,
   updateCountry,
   getAllCountry,
   getCountryById,
   deleteAllCountry,
-
   createCity,
   updateCity,
   getAllCity,

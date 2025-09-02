@@ -119,6 +119,11 @@ const specialtySchema = new mongoose.Schema(
       maxlength: 250,
       unique: true, // still ensures uniqueness at DB level
     },
+    gender: {
+      type: String,
+      enum: ["male", "female"], // or "others" if needed
+      default: "unisex",
+    },
     image: {
       type: String, // store Cloudinary URL or path
       default: "", // optional field
@@ -155,6 +160,11 @@ const measurementSchema = new mongoose.Schema(
       maxlength: 100,
       unique: true, // unique globally
     },
+    gender: {
+      type: String,
+      enum: ["male", "female"],
+      default: "unisex",
+    },
     type: {
       type: String,
       enum: ["top_wear", "bottom_wear", "common"],
@@ -190,6 +200,10 @@ const measurementTemplateSchema = new mongoose.Schema(
       ref: "Specialty",
       required: true,
     },
+     gender: {
+      type: String,
+      enum: ["male", "female"],
+    },
     description: { type: String },
     image: [{ type: String }], // Cloudinary URLs
     measurementPoints: [measurementPointSchema],
@@ -206,7 +220,10 @@ const categorySchema = new mongoose.Schema(
       unique: true,
       trim: true,
     },
-    
+    image: {
+      type: String, 
+      default: "", 
+    },
     description: {
       type: String,
       maxlength: 500,
@@ -252,6 +269,27 @@ taxMasterSchema.pre("save", async function (next) {
   }
   next();
 });
+
+// In your TermsPolicy model
+const termsPolicySchema = new mongoose.Schema({
+   userType: {
+      type: String,
+      enum: ["customer", "tailor"],
+      required: true,
+    },
+    contentType: {
+      type: String,
+      enum: ["terms", "privacy"],
+      required: true,
+    },
+  content: { type: String, required: true },
+});
+
+// Add compound unique index
+termsPolicySchema.index({ userType: 1, contentType: 1 }, { unique: true });
+
+export const TermsPolicy = mongoose.model("TermsPolicy", termsPolicySchema);
+
 
 export const TaxMaster = mongoose.model("TaxMaster", taxMasterSchema);
 

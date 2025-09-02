@@ -5,9 +5,10 @@ import Order from "../models/Order.js";
 import User from "../models/User.js";
 import mongoose from "mongoose";
 import TailorInventory from "../models/TailorInventory.js";
-import { Fabric } from "../models/Master.js";
+import { Category, Fabric, MeasurementTemplate, Specialty } from "../models/Master.js";
 import { UserRole } from "../models/userRole.js";
 import ReadymadeCloth from "../models/readymadeCloth.js";
+import { Service } from "../models/Service.js";
 
 // Create Readymade Cloth
 const createReadymadeCloth = asyncHandler(async (req, res) => {
@@ -19,7 +20,7 @@ const createReadymadeCloth = asyncHandler(async (req, res) => {
     fabric,
     colors,
     description,
-    isActive, // optional input
+    isActive,
   } = req.body;
 
   if (!name) throw new ApiError(400, "Name is required");
@@ -94,7 +95,9 @@ const getReadymadeCloths = asyncHandler(async (req, res) => {
 
   return res
     .status(200)
-    .json(new ApiResponse(200, cloths, "Readymade cloths fetched successfully"));
+    .json(
+      new ApiResponse(200, cloths, "Readymade cloths fetched successfully")
+    );
 });
 
 // Get Readymade Cloths by Tailor
@@ -104,7 +107,7 @@ const getReadymadeClothsByTailor = asyncHandler(async (req, res) => {
 
   if (!tailorId) throw new ApiError(400, "Tailor ID is required");
 
-  let filter = { isActive: true, tailorId }; 
+  let filter = { isActive: true, tailorId };
 
   if (fabric) filter.fabric = fabric;
   if (garmentType) filter.garmentType = garmentType;
@@ -124,7 +127,11 @@ const getReadymadeClothsByTailor = asyncHandler(async (req, res) => {
   return res
     .status(200)
     .json(
-      new ApiResponse(200, cloths, "Readymade cloths by tailor fetched successfully")
+      new ApiResponse(
+        200,
+        cloths,
+        "Readymade cloths by tailor fetched successfully"
+      )
     );
 });
 
@@ -199,8 +206,6 @@ const deleteReadymadeCloth = asyncHandler(async (req, res) => {
     .status(200)
     .json(new ApiResponse(200, null, "Readymade cloth deleted successfully"));
 });
-
-
 
 //tailor inventory
 const createTailorInventory = asyncHandler(async (req, res) => {
@@ -469,20 +474,281 @@ const getOrderTracking = asyncHandler(async (req, res) => {
   );
 });
 
+
+
+
+
+const createProductService = asyncHandler(async (req, res) => {
+  const {
+    serviceName,
+    serviceType,
+    description,
+    gender,
+    garmentType,
+    fabricType,
+    stylePattern,
+    measurementType,
+    requestedAlteration,
+    addOn,
+    fittingPreferences,
+    expressDelivery,
+    estimatedDuration,
+    expressDuration,
+    preferenceDuration,
+    regularDuration,
+    trialsOffered,
+    basePrice,
+    expressPrice,
+    preferencePrice,
+    extraCharges,
+    discount,
+    status,
+  } = req.body;
+
+  const tailorId = req.user._id;
+
+  // ✅ Validation
+  if (!serviceName || !serviceType || !gender || !basePrice) {
+    return res.status(400).json({ message: "Required fields are missing" });
+  }
+
+  // ✅ Check references
+  const category = await Category.findById(serviceType);
+  if (!category) {
+    return res.status(400).json({ message: "Invalid serviceType (Category)" });
+  }
+
+  if (garmentType) {
+    const specialty = await Specialty.findById(garmentType);
+    if (!specialty) {
+      return res
+        .status(400)
+        .json({ message: "Invalid garmentType (Specialty)" });
+    }
+  }
+
+  if (fabricType) {
+    const fabric = await Fabric.findById(fabricType);
+    if (!fabric) {
+      return res.status(400).json({ message: "Invalid fabricType (Fabric)" });
+    }
+  }
+
+  if (measurementType) {
+    const template = await MeasurementTemplate.findById(measurementType);
+    if (!template) {
+      return res
+        .status(400)
+        .json({ message: "Invalid measurementType (Template)" });
+    }
+  }
+
+  // ✅ Create service with auto-generated ID
+  const service = await Service.create({
+    serviceId: `SRV-${new Date().getTime()}`,
+    serviceName,
+    serviceType,
+    description,
+    gender,
+    garmentType,
+    fabricType,
+    tailorId,
+    stylePattern,
+    measurementType,
+    requestedAlteration,
+    addOn,
+    fittingPreferences,
+    expressDelivery,
+    estimatedDuration,
+    expressDuration,
+    preferenceDuration,
+    regularDuration,
+    trialsOffered,
+    basePrice,
+    expressPrice,
+    preferencePrice,
+    extraCharges,
+    discount,
+    status,
+  });
+
+  res.status(201).json({
+    message: "Service created successfully",
+    data: service,
+  });
+});
+
+const updateService = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  const service = await Service.findById(id);
+  if (!service) {
+    return res.status(404).json({ message: "Service not found" });
+  }
+
+  // Update fields **only if provided**
+  const fieldsToUpdate = [
+    "serviceName",
+    "serviceType",
+    "description",
+    "gender",
+    "garmentType",
+    "fabricType",
+    "stylePattern",
+    "measurementType",
+    "requestedAlteration",
+    "addOn",
+    "fittingPreferences",
+    "expressDelivery",
+    "estimatedDuration",
+    "expressDuration",
+    "preferenceDuration",
+    "regularDuration",
+    "trialsOffered",
+    "basePrice",
+    "expressPrice",
+    "preferencePrice",
+    "extraCharges",
+    "discount",
+    "status",
+  ];
+
+  fieldsToUpdate.forEach((field) => {
+    if (req.body[field] !== undefined) {
+      service[field] = req.body[field];
+    }
+  });
+
+  // Validate references (if they are updated)
+  if (req.body.serviceType) {
+    const category = await Category.findById(req.body.serviceType);
+    if (!category)
+      return res.status(400).json({ message: "Invalid serviceType (Category)" });
+  }
+
+  if (req.body.garmentType) {
+    const specialty = await Specialty.findById(req.body.garmentType);
+    if (!specialty)
+      return res.status(400).json({ message: "Invalid garmentType (Specialty)" });
+  }
+
+  if (req.body.fabricType) {
+    const fabric = await Fabric.findById(req.body.fabricType);
+    if (!fabric)
+      return res.status(400).json({ message: "Invalid fabricType (Fabric)" });
+  }
+
+  if (req.body.measurementType) {
+    const template = await MeasurementTemplate.findById(req.body.measurementType);
+    if (!template)
+      return res.status(400).json({ message: "Invalid measurementType (Template)" });
+  }
+
+  await service.save();
+
+  res
+    .status(200)
+    .json({ message: "Service updated successfully", data: service });
+});
+
+
+const deleteService = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  const service = await Service.findById(id);
+  if (!service) {
+    return res.status(404).json({ message: "Service not found" });
+  }
+
+  await service.deleteOne();
+
+  res.status(200).json({ message: "Service deleted successfully" });
+});
+
+const getServiceById = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  const service = await Service.findById(id)
+    .populate("serviceType", "name")
+    .populate("garmentType", "name")
+    .populate("fabricType", "name")
+    .populate("measurementType", "name");
+
+  if (!service) {
+    return res.status(404).json({ message: "Service not found" });
+  }
+
+  res.status(200).json({ data: service });
+});
+
+const getAllServices = asyncHandler(async (req, res) => {
+  const {
+    serviceType,
+    gender,
+    garmentType,
+    fabricType,
+    status,
+    minPrice,
+    maxPrice,
+    page = 1,
+    limit = 10,
+  } = req.query;
+
+  let filter = {};
+
+  if (serviceType) filter.serviceType = serviceType;
+  if (gender) filter.gender = gender;
+  if (garmentType) filter.garmentType = garmentType;
+  if (fabricType) filter.fabricType = fabricType;
+  if (status) filter.status = status;
+
+  if (minPrice || maxPrice) {
+    filter.basePrice = {};
+    if (minPrice) filter.basePrice.$gte = Number(minPrice);
+    if (maxPrice) filter.basePrice.$lte = Number(maxPrice);
+  }
+
+  const skip = (page - 1) * limit;
+
+  const services = await Service.find(filter)
+    .populate("serviceType", "name")
+    .populate("garmentType", "name")
+    .populate("fabricType", "name")
+    .populate("measurementType", "name")
+    .skip(skip)
+    .limit(Number(limit));
+
+  const total = await Service.countDocuments(filter);
+
+  res.status(200).json({
+    total,
+    page: Number(page),
+    limit: Number(limit),
+    data: services,
+  });
+});
+
 export {
+  createProductService,
+  updateService,
+  deleteService,
+  getServiceById,
+  getAllServices,
+
   createReadymadeCloth,
   getReadymadeCloths,
   getReadymadeCloth,
   updateReadymadeCloth,
   deleteReadymadeCloth,
   getReadymadeClothsByTailor,
-
+  
   createTailorInventory,
   updateTailorInventory,
   getInventoryById,
   deleteTailorInventory,
   getTailorInventories,
   getAllTailorInventories,
+
   listOrders,
   getOrderDetails,
   updateOrderStatus,
