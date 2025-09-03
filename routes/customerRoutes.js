@@ -7,6 +7,7 @@ import {
 } from "../validators/customerValidators.js";
 import multer from "../middleware/multer.middleware.js";
 import { getUserById } from "../controllers/user.controller.js";
+import { verifyJWT } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
@@ -28,7 +29,14 @@ router.get("/events/calendar", customerController.getEventsCalendar);
 
 
 /** Order placement and tracking */
-router.post("/orders", validateOrderPlacement, customerController.placeOrder);
+router.post("/orders",verifyJWT,  customerController.placeOrder); 
+router.post("/customer-all-orders", verifyJWT, customerController.getCustomerOrders);
+router.post("/all-orders",  customerController.getCustomerOrders);
+
+router.post("/order-readymade-cloth",verifyJWT,  customerController.orderReadymadeCloth);
+router.post("/get-all-Readymade-orders", verifyJWT, customerController.getAllReadymadeOrders);
+router.post("/get-my-readymaderorders",  customerController.getMyReadymadeOrders);
+
 router.get("/orders/:orderId/tracking", customerController.getOrderTracking);
 router.get("/orders/history", customerController.getOrderHistory);
 router.post("/orders/:orderId/payment", customerController.makePayment);

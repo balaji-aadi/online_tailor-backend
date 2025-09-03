@@ -1,31 +1,40 @@
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { ApiError } from "../utils/ApiError.js";
-import Order from "../models/Order.js";
 import User from "../models/User.js";
 import mongoose from "mongoose";
 import TailorInventory from "../models/TailorInventory.js";
-import { Category, Fabric, MeasurementTemplate, Specialty } from "../models/Master.js";
+import {
+  Category,
+  Fabric,
+  MeasurementTemplate,
+  Specialty,
+} from "../models/Master.js";
 import { UserRole } from "../models/userRole.js";
 import ReadymadeCloth from "../models/readymadeCloth.js";
 import { Service } from "../models/Service.js";
+import { uploadOnCloudinary } from "../cloudinary.js";
+import { Order } from "../models/Order.js";
 
 // Create Readymade Cloth
 const createReadymadeCloth = asyncHandler(async (req, res) => {
   const {
     name,
     price,
-    garmentType,
+    specialty,
     gender,
     fabric,
     colors,
     description,
     isActive,
+    stock_qty,
+    taxMaster,
   } = req.body;
+  console.log("files:", req.files);
 
   if (!name) throw new ApiError(400, "Name is required");
   if (price === undefined) throw new ApiError(400, "Price is required");
-  if (!garmentType) throw new ApiError(400, "Garment type is required");
+  if (!specialty) throw new ApiError(400, "Garment type is required");
   if (!gender) throw new ApiError(400, "Gender is required");
   if (!fabric) throw new ApiError(400, "Fabric is required");
   if (!colors || colors.length === 0)
@@ -34,17 +43,17 @@ const createReadymadeCloth = asyncHandler(async (req, res) => {
   // Handle images upload
   let images = [];
   if (req.files && req.files.length > 0) {
-    for (const file of req.files) {
+    for (const file of req.files.slice(0, 5)) { 
       const upload = await uploadOnCloudinary(file.path);
       if (upload?.secure_url) images.push(upload.secure_url);
     }
   }
 
-  // Check duplicates by tailorId + name + garmentType
+  // Check duplicates by tailorId + name + specialty
   const existing = await ReadymadeCloth.findOne({
     tailorId: req.user._id,
     name: { $regex: new RegExp("^" + name + "$", "i") },
-    garmentType,
+    specialty,
   });
   if (existing)
     throw new ApiError(
@@ -52,18 +61,21 @@ const createReadymadeCloth = asyncHandler(async (req, res) => {
       "Readymade cloth with this name and garment type already exists for this tailor"
     );
 
+  // Save to DB
   const cloth = await ReadymadeCloth.create({
     tailorId: req.user._id,
     name,
     price,
-    garmentType,
+    specialty,
     gender,
     fabric,
     colors,
-    measurements: "free", // backend controlled
     description,
-    images,
+    measurements: "free", // backend-controlled
+    images, // uploaded images
     isActive: isActive !== undefined ? isActive : true,
+    stock_qty: stock_qty !== undefined ? stock_qty : 0,
+    taxMaster: taxMaster || null,
   });
 
   return res
@@ -71,14 +83,62 @@ const createReadymadeCloth = asyncHandler(async (req, res) => {
     .json(new ApiResponse(201, cloth, "Readymade cloth created successfully"));
 });
 
+// Update Readymade Cloth
+const updateReadymadeCloth = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const {
+    name,
+    price,
+    specialty,
+    gender,
+    fabric,
+    colors,
+    description,
+    isActive,
+    stock_qty,
+    taxMaster,
+  } = req.body;
+
+  const cloth = await ReadymadeCloth.findById(id);
+  if (!cloth) throw new ApiError(404, "Readymade cloth not found");
+
+  // Handle new images if uploaded
+  let images = [];
+  if (req.files && req.files.length > 0) {
+    for (const file of req.files.slice(0, 5)) { 
+      const upload = await uploadOnCloudinary(file.path);
+      if (upload?.secure_url) images.push(upload.secure_url);
+    }
+  }
+
+  if (name) cloth.name = name;
+  if (price !== undefined) cloth.price = price;
+  if (specialty) cloth.specialty = specialty;
+  if (gender) cloth.gender = gender;
+  if (fabric) cloth.fabric = fabric;
+  if (colors && colors.length > 0) cloth.colors = colors;
+  if (description !== undefined) cloth.description = description;
+  if (isActive !== undefined) cloth.isActive = isActive;
+  if (stock_qty !== undefined) cloth.stock_qty = stock_qty;
+  if (taxMaster !== undefined) cloth.taxMaster = taxMaster;
+
+  // measurements always "free" (not editable)
+
+  await cloth.save();
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, cloth, "Readymade cloth updated successfully"));
+});
+
 // Get all Readymade Cloths (with filters)
 const getReadymadeCloths = asyncHandler(async (req, res) => {
-  const { fabric, garmentType, gender, sortByPrice, tailorId } = req.body;
+  const { fabric, specialty, gender, sortByPrice, tailorId } = req.body;
 
   let filter = { isActive: true }; // always fetch active cloths
 
   if (fabric) filter.fabric = fabric;
-  if (garmentType) filter.garmentType = garmentType;
+  if (specialty) filter.specialty = specialty;
   if (gender) filter.gender = gender;
   if (tailorId) filter.tailorId = tailorId;
 
@@ -89,7 +149,7 @@ const getReadymadeCloths = asyncHandler(async (req, res) => {
   }
 
   const cloths = await ReadymadeCloth.find(filter)
-    .populate("garmentType")
+    .populate("specialty")
     .populate("fabric")
     .sort(sort);
 
@@ -103,14 +163,14 @@ const getReadymadeCloths = asyncHandler(async (req, res) => {
 // Get Readymade Cloths by Tailor
 const getReadymadeClothsByTailor = asyncHandler(async (req, res) => {
   const { tailorId } = req.params;
-  const { fabric, garmentType, gender, sortByPrice } = req.body;
+  const { fabric, specialty, gender, sortByPrice } = req.body;
 
   if (!tailorId) throw new ApiError(400, "Tailor ID is required");
 
   let filter = { isActive: true, tailorId };
 
   if (fabric) filter.fabric = fabric;
-  if (garmentType) filter.garmentType = garmentType;
+  if (specialty) filter.specialty = specialty;
   if (gender) filter.gender = gender;
 
   let sort = {};
@@ -120,7 +180,7 @@ const getReadymadeClothsByTailor = asyncHandler(async (req, res) => {
   }
 
   const cloths = await ReadymadeCloth.find(filter)
-    .populate("garmentType")
+    .populate("specialty")
     .populate("fabric")
     .sort(sort);
 
@@ -140,7 +200,7 @@ const getReadymadeCloth = asyncHandler(async (req, res) => {
   const { id } = req.params;
 
   const cloth = await ReadymadeCloth.findById(id)
-    .populate("garmentType")
+    .populate("specialty")
     .populate("fabric");
 
   if (!cloth) throw new ApiError(404, "Readymade cloth not found");
@@ -148,51 +208,6 @@ const getReadymadeCloth = asyncHandler(async (req, res) => {
   return res
     .status(200)
     .json(new ApiResponse(200, cloth, "Readymade cloth fetched successfully"));
-});
-
-// Update Readymade Cloth
-const updateReadymadeCloth = asyncHandler(async (req, res) => {
-  const { id } = req.params;
-  const {
-    name,
-    price,
-    garmentType,
-    gender,
-    fabric,
-    colors,
-    description,
-    isActive,
-  } = req.body;
-
-  const cloth = await ReadymadeCloth.findById(id);
-  if (!cloth) throw new ApiError(404, "Readymade cloth not found");
-
-  // Handle new images if uploaded
-  let newImages = [];
-  if (req.files && req.files.length > 0) {
-    for (const file of req.files) {
-      const upload = await uploadOnCloudinary(file.path);
-      if (upload?.secure_url) newImages.push(upload.secure_url);
-    }
-    cloth.images = [...cloth.images, ...newImages]; // append new images
-  }
-
-  if (name) cloth.name = name;
-  if (price !== undefined) cloth.price = price;
-  if (garmentType) cloth.garmentType = garmentType;
-  if (gender) cloth.gender = gender;
-  if (fabric) cloth.fabric = fabric;
-  if (colors && colors.length > 0) cloth.colors = colors;
-  if (description !== undefined) cloth.description = description;
-  if (isActive !== undefined) cloth.isActive = isActive;
-
-  // measurements always "free" (not editable)
-
-  await cloth.save();
-
-  return res
-    .status(200)
-    .json(new ApiResponse(200, cloth, "Readymade cloth updated successfully"));
 });
 
 // Delete Readymade Cloth
@@ -387,7 +402,7 @@ const getAllTailorInventories = asyncHandler(async (req, res) => {
     );
 });
 
-// ✅ List Orders
+//  List Orders
 const listOrders = asyncHandler(async (req, res) => {
   const orders = await Order.find({ tailorId: req.user._id }).lean();
   return res
@@ -395,7 +410,7 @@ const listOrders = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, orders, "Orders fetched successfully"));
 });
 
-// ✅ Get Order Details
+//  Get Order Details
 const getOrderDetails = asyncHandler(async (req, res) => {
   const { orderId } = req.params;
   const order = await Order.findOne({
@@ -410,7 +425,7 @@ const getOrderDetails = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, order, "Order details fetched"));
 });
 
-// ✅ Update Order Status
+//  Update Order Status
 const updateOrderStatus = asyncHandler(async (req, res) => {
   const { orderId } = req.params;
   const { status } = req.body;
@@ -438,7 +453,7 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, order, "Order status updated"));
 });
 
-// ✅ Mark Rush Order
+//  Mark Rush Order
 const markRushOrder = asyncHandler(async (req, res) => {
   const { orderId } = req.params;
   const order = await Order.findOne({ _id: orderId, tailorId: req.user._id });
@@ -453,7 +468,7 @@ const markRushOrder = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, order, "Order marked as rush order"));
 });
 
-// ✅ Order Tracking
+//  Order Tracking
 const getOrderTracking = asyncHandler(async (req, res) => {
   const { orderId } = req.params;
   const order = await Order.findOne({
@@ -474,17 +489,13 @@ const getOrderTracking = asyncHandler(async (req, res) => {
   );
 });
 
-
-
-
-
 const createProductService = asyncHandler(async (req, res) => {
   const {
     serviceName,
     serviceType,
     description,
     gender,
-    garmentType,
+    specialty,
     fabricType,
     stylePattern,
     measurementType,
@@ -504,53 +515,59 @@ const createProductService = asyncHandler(async (req, res) => {
     discount,
     status,
   } = req.body;
-
+ console.log("req.body", req.body);
   const tailorId = req.user._id;
 
-  // ✅ Validation
-  if (!serviceName || !serviceType || !gender || !basePrice) {
+  //Validation
+  if (!serviceName || !serviceType  || !basePrice) {
     return res.status(400).json({ message: "Required fields are missing" });
   }
 
-  // ✅ Check references
+  let images = [];
+  if (req.files && req.files.length > 0) {
+    for (const file of req.files.slice(0, 5)) {
+      const upload = await uploadOnCloudinary(file.path);
+      if (upload?.secure_url) images.push(upload.secure_url);
+    }
+  }
+
+  // Check references
   const category = await Category.findById(serviceType);
   if (!category) {
     return res.status(400).json({ message: "Invalid serviceType (Category)" });
   }
 
-  if (garmentType) {
-    const specialty = await Specialty.findById(garmentType);
-    if (!specialty) {
-      return res
-        .status(400)
-        .json({ message: "Invalid garmentType (Specialty)" });
-    }
+ if (specialty) {
+  const specialtyDoc = await Specialty.findById(specialty);
+  if (!specialtyDoc) {
+    return res.status(400).json({ message: "Invalid specialty (Specialty)" });
   }
+}
 
-  if (fabricType) {
-    const fabric = await Fabric.findById(fabricType);
-    if (!fabric) {
-      return res.status(400).json({ message: "Invalid fabricType (Fabric)" });
-    }
+
+ if (fabricType) {
+  const fabricDoc = await Fabric.findById(fabricType);
+  if (!fabricDoc) {
+    return res.status(400).json({ message: "Invalid fabricType (Fabric)" });
   }
+}
 
-  if (measurementType) {
-    const template = await MeasurementTemplate.findById(measurementType);
-    if (!template) {
-      return res
-        .status(400)
-        .json({ message: "Invalid measurementType (Template)" });
-    }
+if (measurementType) {
+  const templateDoc = await MeasurementTemplate.findById(measurementType);
+  if (!templateDoc) {
+    return res.status(400).json({ message: "Invalid measurementType (Template)" });
   }
+}
 
-  // ✅ Create service with auto-generated ID
+
+  //  Create service with auto-generated ID
   const service = await Service.create({
     serviceId: `SRV-${new Date().getTime()}`,
     serviceName,
     serviceType,
     description,
     gender,
-    garmentType,
+    specialty,
     fabricType,
     tailorId,
     stylePattern,
@@ -566,6 +583,7 @@ const createProductService = asyncHandler(async (req, res) => {
     trialsOffered,
     basePrice,
     expressPrice,
+    images,
     preferencePrice,
     extraCharges,
     discount,
@@ -586,13 +604,44 @@ const updateService = asyncHandler(async (req, res) => {
     return res.status(404).json({ message: "Service not found" });
   }
 
-  // Update fields **only if provided**
+  //  Handle images
+  let newImages = [];
+  if (req.files && req.files.length > 0) {
+    for (const file of req.files.slice(0, 5)) {
+      const upload = await uploadOnCloudinary(file.path);
+      if (upload?.secure_url) newImages.push(upload.secure_url);
+    }
+  }
+
+  //  If replaceImages flag is true, overwrite images
+  if (req.body.replaceImages === "true") {
+    service.images = newImages;
+  } else {
+    //  Else append uploaded images
+    service.images = [...service.images, ...newImages];
+  }
+
+  //  Remove specific images if requested
+  if (req.body.removeImages) {
+    try {
+      const removeList = JSON.parse(req.body.removeImages); // expecting ["url1", "url2"]
+      service.images = service.images.filter(
+        (img) => !removeList.includes(img)
+      );
+    } catch (err) {
+      return res
+        .status(400)
+        .json({ message: "Invalid removeImages format. Must be JSON array." });
+    }
+  }
+
+  //  Update other fields if provided
   const fieldsToUpdate = [
     "serviceName",
     "serviceType",
     "description",
     "gender",
-    "garmentType",
+    "specialty",
     "fabricType",
     "stylePattern",
     "measurementType",
@@ -619,17 +668,21 @@ const updateService = asyncHandler(async (req, res) => {
     }
   });
 
-  // Validate references (if they are updated)
+  //  Validate references if updated
   if (req.body.serviceType) {
     const category = await Category.findById(req.body.serviceType);
     if (!category)
-      return res.status(400).json({ message: "Invalid serviceType (Category)" });
+      return res
+        .status(400)
+        .json({ message: "Invalid serviceType (Category)" });
   }
 
-  if (req.body.garmentType) {
-    const specialty = await Specialty.findById(req.body.garmentType);
+  if (req.body.specialty) {
+    const specialty = await Specialty.findById(req.body.specialty);
     if (!specialty)
-      return res.status(400).json({ message: "Invalid garmentType (Specialty)" });
+      return res
+        .status(400)
+        .json({ message: "Invalid specialty (Specialty)" });
   }
 
   if (req.body.fabricType) {
@@ -639,18 +692,22 @@ const updateService = asyncHandler(async (req, res) => {
   }
 
   if (req.body.measurementType) {
-    const template = await MeasurementTemplate.findById(req.body.measurementType);
+    const template = await MeasurementTemplate.findById(
+      req.body.measurementType
+    );
     if (!template)
-      return res.status(400).json({ message: "Invalid measurementType (Template)" });
+      return res
+        .status(400)
+        .json({ message: "Invalid measurementType (Template)" });
   }
 
   await service.save();
 
-  res
-    .status(200)
-    .json({ message: "Service updated successfully", data: service });
+  res.status(200).json({
+    message: "Service updated successfully",
+    data: service,
+  });
 });
-
 
 const deleteService = asyncHandler(async (req, res) => {
   const { id } = req.params;
@@ -670,7 +727,7 @@ const getServiceById = asyncHandler(async (req, res) => {
 
   const service = await Service.findById(id)
     .populate("serviceType", "name")
-    .populate("garmentType", "name")
+    .populate("specialty", "name")
     .populate("fabricType", "name")
     .populate("measurementType", "name");
 
@@ -685,20 +742,21 @@ const getAllServices = asyncHandler(async (req, res) => {
   const {
     serviceType,
     gender,
-    garmentType,
+    specialty,
     fabricType,
     status,
     minPrice,
     maxPrice,
     page = 1,
     limit = 10,
-  } = req.query;
+  } = req.body;
 
-  let filter = {};
+  const filter = {};
 
+  // Apply filters only if provided
   if (serviceType) filter.serviceType = serviceType;
   if (gender) filter.gender = gender;
-  if (garmentType) filter.garmentType = garmentType;
+  if (specialty) filter.specialty = specialty;
   if (fabricType) filter.fabricType = fabricType;
   if (status) filter.status = status;
 
@@ -708,11 +766,11 @@ const getAllServices = asyncHandler(async (req, res) => {
     if (maxPrice) filter.basePrice.$lte = Number(maxPrice);
   }
 
-  const skip = (page - 1) * limit;
+  const skip = (Number(page) - 1) * Number(limit);
 
   const services = await Service.find(filter)
     .populate("serviceType", "name")
-    .populate("garmentType", "name")
+    .populate("specialty", "name")
     .populate("fabricType", "name")
     .populate("measurementType", "name")
     .skip(skip)
@@ -724,6 +782,7 @@ const getAllServices = asyncHandler(async (req, res) => {
     total,
     page: Number(page),
     limit: Number(limit),
+    totalPages: Math.ceil(total / Number(limit)),
     data: services,
   });
 });
@@ -734,21 +793,18 @@ export {
   deleteService,
   getServiceById,
   getAllServices,
-
   createReadymadeCloth,
   getReadymadeCloths,
   getReadymadeCloth,
   updateReadymadeCloth,
   deleteReadymadeCloth,
   getReadymadeClothsByTailor,
-  
   createTailorInventory,
   updateTailorInventory,
   getInventoryById,
   deleteTailorInventory,
   getTailorInventories,
   getAllTailorInventories,
-
   listOrders,
   getOrderDetails,
   updateOrderStatus,

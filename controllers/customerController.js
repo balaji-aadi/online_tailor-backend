@@ -1,5 +1,4 @@
 import TailorProfile from "../models/TailorProfile.js";
-import Order from "../models/Order.js";
 import Review from "../models/Review.js";
 import logger from "../utils/logger.js";
 import crypto from "crypto";
@@ -10,86 +9,86 @@ import { ApiError } from "../utils/ApiError.js";
 import { deleteFromCloudinary, uploadOnCloudinary } from "../cloudinary.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { UserRole } from "../models/userRole.js";
-
+import User from "../models/User.js";
+import { Service } from "../models/Service.js";
+import ReadymadeCloth from "../models/readymadeCloth.js";
+import { Order, ReadymadeOrder } from "../models/Order.js";
 
 const loginCustomer = asyncHandler(async (req, res) => {
   try {
-   
     const { emailOrPhone, password, provider } = req.body;
+    const requestedRoleId = Number(req.params.role_id);
+    console.log("loginCustomer req.body:", req.body);
 
-    const requiredFields = {
-      emailOrPhone,
-    };
-
-    const missingFields = Object.keys(requiredFields).filter(
-      (field) => !requiredFields[field] || requiredFields[field] === "undefined"
-    );
-
-    if (missingFields.length > 0) {
+    if (!emailOrPhone) {
       return res
         .status(400)
-        .json(
-          new ApiError(
-            400,
-            `Missing required field: ${missingFields.join(", ")}`
-          )
-        );
+        .json(new ApiError(400, "Missing required field: emailOrPhone"));
     }
 
+    // Choose model based on role
+    const Model = requestedRoleId === 3 ? Customer : User;
+    const phoneField = requestedRoleId === 3 ? "contactNumber" : "phone_number";
+
     let user;
+
     if (!provider) {
+      // Normal login
       if (emailOrPhone.includes("@")) {
-        user = await Customer.findOne({ email: emailOrPhone }).populate(
+        user = await Model.findOne({ email: emailOrPhone }).populate(
           "user_role"
         );
-        
         if (!user)
           return res.status(400).json(new ApiError(400, "Email not found!"));
       } else {
-        user = await Customer.findOne({ phone_number: emailOrPhone }).populate(
+        user = await Model.findOne({ [phoneField]: emailOrPhone }).populate(
           "user_role"
         );
-       
         if (!user)
           return res
             .status(400)
             .json(new ApiError(400, "Phone number not found!"));
       }
 
+      // Password check
       const isPasswordValid = await user.isPasswordCorrect(password);
-
-      if (!isPasswordValid) {
+      if (!isPasswordValid)
         return res
           .status(401)
           .json(new ApiError(401, "Invalid user credentials"));
-      }
     } else {
+      // Provider login
       if (emailOrPhone.includes("@")) {
-        user = await Customer.findOne({
-          email: emailOrPhone,
-        }).populate("user_role");
-       
+        user = await Model.findOne({ email: emailOrPhone }).populate(
+          "user_role"
+        );
       } else {
-        user = await Customer.findOne({
-          phone_number: emailOrPhone,
-        }).populate("user_role");
-         
+        user = await Model.findOne({ [phoneField]: emailOrPhone }).populate(
+          "user_role"
+        );
       }
     }
 
-    if (
-      !user ||
-      !user.user_role ||
-      user.user_role.role_id !== Number(req.params.role_id)
-    ) {
+    // Validate role: allow role_id 1 (admin) to log in as any role
+    if (!user || !user.user_role) {
       return res.status(404).json(new ApiError(404, "User does not exist"));
     }
 
+    const actualRoleId = user.user_role.role_id;
+    if (actualRoleId !== 1 && actualRoleId !== requestedRoleId) {
+      return res
+        .status(404)
+        .json(new ApiError(404, "User does not exist or role mismatch"));
+    }
+
+    // Generate tokens
     const { accessToken, refreshToken } = await generateAccessAndRefereshTokens(
-      user._id
+      user._id,
+      actualRoleId
     );
 
-    const loggedInUser = await Customer.findById(user._id)
+    // Remove sensitive info
+    const loggedInUser = await Model.findById(user._id)
       .select("-password -refreshToken -otp -otp_time")
       .populate("user_role")
       .populate("country")
@@ -104,12 +103,12 @@ const loginCustomer = asyncHandler(async (req, res) => {
       .json(
         new ApiResponse(
           200,
-          { user: loggedInUser,  accessToken, refreshToken },
-          "User logged In Successfully"
+          { user: loggedInUser, accessToken, refreshToken },
+          "User logged in successfully"
         )
       );
   } catch (error) {
-    console.error("Error during login:", error);
+    console.error("Error during customer login:", error);
     return res.status(500).json(new ApiError(500, "Internal Server Error"));
   }
 });
@@ -129,8 +128,11 @@ const registerCustomer = asyncHandler(async (req, res) => {
   } = req.body;
 
   // ✅ Validate required fields
-  if (!name || !contactNumber || !email) {
-    throw new ApiError(400, "Name, contactNumber, and email are required");
+  if (!name || !contactNumber || !email || !password) {
+    throw new ApiError(
+      400,
+      "Name, contactNumber, password and email are required"
+    );
   }
 
   // ✅ Check if email already exists
@@ -170,7 +172,10 @@ const registerCustomer = asyncHandler(async (req, res) => {
     parsedLocation =
       typeof location === "string" ? JSON.parse(location) : location;
     // Ensure coordinates array exists
-    if (!parsedLocation.coordinates || parsedLocation.coordinates.length !== 2) {
+    if (
+      !parsedLocation.coordinates ||
+      parsedLocation.coordinates.length !== 2
+    ) {
       parsedLocation = null;
     }
   }
@@ -330,7 +335,6 @@ const updateCustomerMeasurements = asyncHandler(async (req, res) => {
     );
 });
 
-
 // Get logged-in customer profile
 const getLoggedInCustomer = asyncHandler(async (req, res) => {
   try {
@@ -355,7 +359,9 @@ const getLoggedInCustomer = asyncHandler(async (req, res) => {
 
     return res
       .status(200)
-      .json(new ApiResponse(200, customer, "Customer profile fetched successfully"));
+      .json(
+        new ApiResponse(200, customer, "Customer profile fetched successfully")
+      );
   } catch (error) {
     console.error("Error fetching logged-in customer:", error);
     return res
@@ -372,7 +378,9 @@ const getCustomerById = asyncHandler(async (req, res) => {
     if (!customerId || !mongoose.Types.ObjectId.isValid(customerId)) {
       return res
         .status(400)
-        .json(new ApiResponse(400, null, "Invalid or missing customerId in query"));
+        .json(
+          new ApiResponse(400, null, "Invalid or missing customerId in query")
+        );
     }
 
     const customer = await Customer.findById(customerId)
@@ -388,7 +396,9 @@ const getCustomerById = asyncHandler(async (req, res) => {
 
     return res
       .status(200)
-      .json(new ApiResponse(200, customer, "Customer profile fetched successfully"));
+      .json(
+        new ApiResponse(200, customer, "Customer profile fetched successfully")
+      );
   } catch (error) {
     console.error("Error fetching customer:", error);
     return res
@@ -396,8 +406,6 @@ const getCustomerById = asyncHandler(async (req, res) => {
       .json(new ApiResponse(500, null, "Internal server error"));
   }
 });
-
-
 
 // =========================
 // Tailor Discovery & Recommendations
@@ -454,41 +462,41 @@ const getEventsCalendar = async (req, res, next) => {
 // =========================
 // Orders
 // =========================
-const placeOrder = async (req, res, next) => {
-  try {
-    const {
-      tailorId,
-      orderDetails,
-      measurements,
-      paymentMethod,
-      customizations,
-      deliveryAddress,
-    } = req.body;
+// const placeOrder = async (req, res, next) => {
+//   try {
+//     const {
+//       tailorId,
+//       orderDetails,
+//       measurements,
+//       paymentMethod,
+//       customizations,
+//       deliveryAddress,
+//     } = req.body;
 
-    const order = new Order({
-      customerId: req.user._id,
-      tailorId,
-      intakeChannel: "mobile_app",
-      classification: orderDetails.classification,
-      lifecycleStatus: {
-        current: "pending",
-        timestamps: { pending: new Date() },
-      },
-      orderDetails,
-      measurements,
-      customizations,
-      deliveryAddress,
-      createdAt: new Date(),
-    });
+//     const order = new Order({
+//       customerId: req.user._id,
+//       tailorId,
+//       intakeChannel: "mobile_app",
+//       classification: orderDetails.classification,
+//       lifecycleStatus: {
+//         current: "pending",
+//         timestamps: { pending: new Date() },
+//       },
+//       orderDetails,
+//       measurements,
+//       customizations,
+//       deliveryAddress,
+//       createdAt: new Date(),
+//     });
 
-    await order.save();
-    res
-      .status(201)
-      .json({ message: "Order placed successfully", orderId: order._id });
-  } catch (error) {
-    next(error);
-  }
-};
+//     await order.save();
+//     res
+//       .status(201)
+//       .json({ message: "Order placed successfully", orderId: order._id });
+//   } catch (error) {
+//     next(error);
+//   }
+// };
 
 const getOrderTracking = async (req, res, next) => {
   try {
@@ -562,12 +570,10 @@ const uploadProgressPhoto = async (req, res, next) => {
     });
     await order.save();
 
-    res
-      .status(201)
-      .json({
-        message: "Progress photo uploaded",
-        progressPhotos: order.progressPhotos,
-      });
+    res.status(201).json({
+      message: "Progress photo uploaded",
+      progressPhotos: order.progressPhotos,
+    });
   } catch (error) {
     next(error);
   }
@@ -636,12 +642,10 @@ const submitReview = async (req, res, next) => {
       createdAt: new Date(),
     }).save();
 
-    res
-      .status(201)
-      .json({
-        message: "Review submitted and pending moderation",
-        reviewId: review._id,
-      });
+    res.status(201).json({
+      message: "Review submitted and pending moderation",
+      reviewId: review._id,
+    });
   } catch (error) {
     next(error);
   }
@@ -696,10 +700,188 @@ const shareOnSocialMedia = async (req, res, next) => {
   res.json({ message: "Social media sharing - to be implemented" });
 };
 
+const orderReadymadeCloth = asyncHandler(async (req, res) => {
+  const { ReadymadeClothId, address, finalPrice } = req.body;
+  console.log("user:", req.user);
+
+  // ✅ Validate inputs
+  if (!ReadymadeClothId || !address || !finalPrice) {
+    throw new ApiError(
+      400,
+      "ReadymadeClothId, address, and finalPrice are required"
+    );
+  }
+
+  // ✅ Get customer from req.user.id
+  const customer = await Customer.findById(req.user._id);
+  if (!customer) {
+    throw new ApiError(404, "Customer not found");
+  }
+
+  // ✅ Check if cloth exists
+  const cloth = await ReadymadeCloth.findById(ReadymadeClothId);
+  if (!cloth) {
+    throw new ApiError(404, "Readymade cloth not found");
+  }
+
+  // ✅ Create new order
+  const newOrder = await ReadymadeOrder.create({
+    customer: {
+      id: customer._id,
+      name: customer.name,
+      address, // take delivery address from req.body
+    },
+    readymadeCloth: cloth._id,
+    tailorId: cloth.tailorId,
+    finalPrice,
+    status: "Pending",
+  });
+
+  res.status(201).json(
+    new ApiResponse(201, newOrder, "Readymade cloth order placed successfully")
+  );
+});
+
+
+
+const getAllReadymadeOrders = asyncHandler(async (req, res) => {
+  const { userId, tailorId, clothId, status } = req.body;
+
+  const filter = {};
+
+  if (userId) filter["customer.id"] = userId;
+  if (tailorId) filter.tailorId = tailorId;
+  if (clothId) filter.readymadeCloth = clothId;
+  if (status) filter.status = status;
+
+  const orders = await ReadymadeOrder.find(filter)
+    .populate("readymadeCloth")
+    .populate("customer.id", "name email contactNumber")
+    .populate("tailorId", "ownerName businessName email");
+
+  res
+    .status(200)
+    .json(
+      new ApiResponse(200, orders, "Readymade orders fetched successfully")
+    );
+});
+
+const getMyReadymadeOrders = asyncHandler(async (req, res) => {
+  const customerId = req.user?._id || req.user?.id;
+
+  if (!customerId) {
+    throw new ApiError(401, "Unauthorized: customerId not found in request");
+  }
+
+  const orders = await ReadymadeOrder.find({ "customer.id": customerId })
+    .populate("readymadeCloth")
+    .populate("tailorId", "ownerName businessName email");
+
+  res
+    .status(200)
+    .json(
+      new ApiResponse(200, orders, "Your readymade orders fetched successfully")
+    );
+});
+
+const placeOrder = asyncHandler(async (req, res) => {
+  const { service_id, deliveryOption, additionalNotes } = req.body;
+  const customerId = req.user._id; // assuming auth middleware sets req.user
+
+  // ✅ Validate required fields
+  if (!service_id) {
+    throw new ApiError(400, "Service ID is required to place an order");
+  }
+
+  // ✅ Fetch customer
+  const customer = await Customer.findById(customerId);
+  if (!customer) {
+    throw new ApiError(404, "Customer not found");
+  }
+
+  // ✅ Fetch service
+  const service = await Service.findById(service_id);
+  if (!service) {
+    throw new ApiError(404, "Service not found");
+  }
+
+  // ✅ Calculate price based on delivery option
+  let price = service.basePrice;
+  if (deliveryOption === "express" && service.expressPrice)
+    price = service.expressPrice;
+  if (deliveryOption === "preference" && service.preferencePrice)
+    price = service.preferencePrice;
+
+  // ✅ Create order
+  const order = await Order.create({
+    service: service._id,
+    tailor: service.tailorId,
+    customer: customer._id,
+    customerName: customer.name,
+    customerAddress: customer.address,
+    price,
+    deliveryOption: deliveryOption || "regular",
+    additionalNotes,
+  });
+
+  return res
+    .status(201)
+    .json(new ApiResponse(201, order, "Order placed successfully"));
+});
+
+const getCustomerOrders = asyncHandler(async (req, res) => {
+  const customerId = req.user._id;
+
+  const orders = await Order.find({ customer: customerId })
+    .populate("service")
+    .populate("tailor", "ownerName businessName")
+    .sort({ createdAt: -1 });
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, orders, "Customer orders fetched successfully"));
+});
+
+const getAllOrders = asyncHandler(async (req, res) => {
+  const { tailorId, customerId, serviceId } = req.body;
+
+  // Build dynamic query
+  const query = {};
+  if (tailorId) query.tailor = tailorId;
+  if (customerId) query.customer = customerId;
+  if (serviceId) query.service = serviceId;
+
+  const orders = await Order.find(query)
+    .populate("service")
+    .populate("tailor", "ownerName businessName email")
+    .populate("customer", "name email contactNumber address")
+    .sort({ createdAt: -1 });
+
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(
+        200,
+        orders,
+        orders.length
+          ? "Orders fetched successfully"
+          : "No orders found for the given filter"
+      )
+    );
+});
+
 // =========================
 // Exports
 // =========================
 export {
+  getAllOrders,
+  getCustomerOrders,
+  placeOrder,
+
+  orderReadymadeCloth,
+  getAllReadymadeOrders,
+  getMyReadymadeOrders,
+
   loginCustomer,
   getCustomerById,
   getLoggedInCustomer,
@@ -710,7 +892,6 @@ export {
   searchTailors,
   getRecommendations,
   getEventsCalendar,
-  placeOrder,
   getOrderTracking,
   getOrderHistory,
   makePayment,

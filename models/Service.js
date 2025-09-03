@@ -6,6 +6,7 @@ const serviceSchema = new mongoose.Schema(
     serviceId: { type: String, unique: true, required: true }, 
      tailorId: { type: Schema.Types.ObjectId, ref: "User", required: true }, 
     serviceName: { type: String, required: true },
+    images: [{ type: String }], 
     serviceType: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Category", // from Category master
@@ -13,10 +14,10 @@ const serviceSchema = new mongoose.Schema(
     },
     description: { type: String },
 
-    gender: { type: String, enum: ["Male", "Female"], required: true },
+    gender: { type: String, enum: ["male", "female"] },
 
     // Stitching / Alteration Options
-    garmentType: {
+    specialty: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Specialty", // from Specialty master
     },
@@ -32,8 +33,7 @@ const serviceSchema = new mongoose.Schema(
     requestedAlteration: { type: String },
     addOn: { type: String },
     fittingPreferences: {
-      type: String,
-      enum: ["Slim Fit", "Regular", "Comfort"],
+      type: String
     },
 
     // Service Delivery
@@ -51,7 +51,7 @@ const serviceSchema = new mongoose.Schema(
     extraCharges: { type: Number },
     discount: { type: Number, default: 0 },
 
-    status: { type: String, enum: ["Active", "Inactive"], default: "Active" },
+    status: { type: String, enum: ["active", "inactive"], default: "active" },
   },
   { timestamps: true }
 );

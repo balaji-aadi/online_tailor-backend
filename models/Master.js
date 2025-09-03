@@ -217,7 +217,7 @@ const categorySchema = new mongoose.Schema(
     name: {
       type: String,
       required: true,
-      unique: true,
+      enum: ["readymade", "stitching", "alteration"],
       trim: true,
     },
     image: {

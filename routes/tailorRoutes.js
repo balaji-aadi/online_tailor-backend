@@ -16,17 +16,17 @@ router.use(verifyJWT);
 
 
 /** ---------------- Readymade Cloths ---------------- */
-router.post("/create-service",verifyJWT,multer.uploadMultiple("image"), tailorController.createProductService);
-router.put("/update-service/:id",verifyJWT,multer.uploadMultiple("image"), tailorController.updateService);
-router.get("/get-service-byid/:id",verifyJWT, tailorController.getServiceById);
+router.post("/create-service",verifyJWT,multer.uploadMultiple("images"), tailorController.createProductService);
+router.put("/update-service/:id",verifyJWT,multer.uploadMultiple("images"), tailorController.updateService);
+router.get("/get-service/:id",verifyJWT, tailorController.getServiceById);
 router.delete("/delete-service/:id",verifyJWT, tailorController.deleteService);
 router.post("/get-all-service/:tailorId",verifyJWT, tailorController.getReadymadeClothsByTailor);
-router.post("/get-all-service",verifyJWT, tailorController.getAllServices);
+router.post("/get-all-services",verifyJWT, tailorController.getAllServices);
 
 
 /** ---------------- Readymade Cloths ---------------- */
-router.post("/create-readymade-cloth",verifyJWT,multer.uploadMultiple("image"), tailorController.createReadymadeCloth);
-router.put("/update-readymade-cloth/:id",verifyJWT,multer.uploadMultiple("image"), tailorController.updateReadymadeCloth);
+router.post("/create-readymade-cloth",verifyJWT,multer.uploadMultiple("images"), tailorController.createReadymadeCloth);
+router.put("/update-readymade-cloth/:id",verifyJWT,multer.uploadMultiple("images"), tailorController.updateReadymadeCloth);
 router.get("/get-readymade-cloth/:id",verifyJWT, tailorController.getReadymadeCloth);
 router.delete("/delete-readymade-cloth/:id",verifyJWT, tailorController.deleteReadymadeCloth);
 router.post("/get-all-readymade-cloth-by-Tailor/:tailorId",verifyJWT, tailorController.getReadymadeClothsByTailor);

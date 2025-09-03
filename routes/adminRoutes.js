@@ -45,7 +45,7 @@ router.post("/logout", logoutUser);
 router.post( "/users/verify",validateAdminUserVerification,verifyJWT,verifyUser);
 router.post("/users/approve", approveUser);
 router.post("/tailors-status-update", verifyTailorAccount);
-router.get("/users", getAllUsers);
+router.post("/users", getAllUsers);
 router.put("/users/roles/:userId", updateUserRole);
 
 // Bulk import/export

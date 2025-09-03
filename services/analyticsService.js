@@ -1,4 +1,4 @@
-import Order from '../models/Order.js';
+import { Order } from "../models/Order.js";
 import TailorProfile from '../models/TailorProfile.js';
 import  User from '../models/User.js';
 

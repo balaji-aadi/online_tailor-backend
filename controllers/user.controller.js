@@ -2,7 +2,6 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { ApiError } from "../utils/ApiError.js";
 import TailorProfile from "../models/TailorProfile.js";
-import Order from "../models/Order.js";
 import fs from "fs";
 import path from "path";
 import User from "../models/User.js";

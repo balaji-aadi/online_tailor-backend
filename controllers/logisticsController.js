@@ -1,5 +1,5 @@
 import axios from 'axios';
-import Order from '../models/Order.js';
+import { Order } from "../models/Order.js";
 import logger from '../utils/logger.js';
 
 // Carrier API integration configs (stubs)

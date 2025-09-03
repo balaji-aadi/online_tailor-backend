@@ -15,6 +15,7 @@ import { ApiResponse } from "../utils/ApiResponse.js";
 import { UserRole } from "../models/userRole.js";
 import { sendEmail } from "../utils/emails/sendEmail.js";
 import { TermsPolicy } from "../models/Master.js";
+import Customer from "../models/Customer.js";
 
 // List users with optional role filter, search, pagination
 const getAllUsers = asyncHandler(async (req, res) => {
@@ -39,31 +40,33 @@ const getAllUsers = asyncHandler(async (req, res) => {
     UserRole.findOne({ role_id: 3 }),
   ]);
 
-  // Ensure ObjectId
-  const adminRoleId = adminRole?._id
-    ? new mongoose.Types.ObjectId(adminRole._id)
-    : null;
-  const tailorRoleId = tailorRole?._id
-    ? new mongoose.Types.ObjectId(tailorRole._id)
-    : null;
-  const customerRoleId = customerRole?._id
-    ? new mongoose.Types.ObjectId(customerRole._id)
-    : null;
+  const adminRoleId = adminRole?._id ? new mongoose.Types.ObjectId(adminRole._id) : null;
+  const tailorRoleId = tailorRole?._id ? new mongoose.Types.ObjectId(tailorRole._id) : null;
+  const customerRoleId = customerRole?._id ? new mongoose.Types.ObjectId(customerRole._id) : null;
 
-  if (city) query.city = new mongoose.Types.ObjectId(city);
+  // Determine collection
+  const Model = role === "customer" ? Customer : User;
 
   // Build query
   const query = {};
-  if (adminRoleId) query.user_role = { $ne: adminRoleId };
-  if (role === "tailor" && tailorRoleId) query.user_role = tailorRoleId;
-  if (role === "customer" && customerRoleId) query.user_role = customerRoleId;
-  if (
-    status &&
-    ["pending", "approved", "rejected"].includes(status.toLowerCase())
-  )
-    query["tailorInfo.status"] = status.toLowerCase();
-  if (gender && ["male", "female", "others"].includes(gender.toLowerCase()))
-    query["tailorInfo.professionalInfo.gender"] = gender.toLowerCase();
+
+  if (role === "customer" && customerRoleId) {
+    query.user_role = customerRoleId;
+  } else {
+    if (adminRoleId) query.user_role = { $ne: adminRoleId };
+    if (role === "tailor" && tailorRoleId) query.user_role = tailorRoleId;
+    if (
+      status &&
+      ["pending", "approved", "rejected"].includes(status?.toLowerCase())
+    )
+      query["tailorInfo.status"] = status.toLowerCase();
+    if (
+      gender &&
+      ["male", "female", "others"].includes(gender?.toLowerCase())
+    )
+      query["tailorInfo.professionalInfo.gender"] = gender.toLowerCase();
+  }
+
   if (city) query.city = mongoose.Types.ObjectId(city);
   if (search) {
     const regex = new RegExp(search, "i");
@@ -74,38 +77,29 @@ const getAllUsers = asyncHandler(async (req, res) => {
       { ownerName: regex },
       { businessName: regex },
       { phone_number: regex },
+      ...(role === "customer"
+        ? [{ name: regex }, { contactNumber: regex }] // customer fields
+        : []),
     ];
   }
 
-  // Fetch users
-  const users = await User.find(query)
+  // Fetch users/customers
+  let queryBuilder = Model.find(query)
     .populate("user_role country city")
     .select("-otp -otp_time -password -refreshToken")
-    .populate("tailorInfo.professionalInfo.specialties")
     .sort({ _id: sort === "asc" ? 1 : -1 })
     .skip((pageNum - 1) * limitNum)
     .limit(limitNum);
 
-  // Fetch counts
-  const totalUsers = await User.countDocuments({
-    user_role: { $ne: adminRoleId },
-  });
-  const totalTailors = await User.countDocuments({ user_role: tailorRoleId });
-  const totalCustomers = await User.countDocuments({
-    user_role: customerRoleId,
-  });
-  const pendingTailors = await User.countDocuments({
-    user_role: tailorRoleId,
-    "tailorInfo.status": "pending",
-  });
-  const approvedTailors = await User.countDocuments({
-    user_role: tailorRoleId,
-    "tailorInfo.status": "approved",
-  });
-  const rejectedTailors = await User.countDocuments({
-    user_role: tailorRoleId,
-    "tailorInfo.status": "rejected",
-  });
+  // Only populate tailorInfo for User schema
+  if (role !== "customer") {
+    queryBuilder = queryBuilder.populate("tailorInfo.professionalInfo.specialties");
+  }
+
+  const users = await queryBuilder;
+
+  // Count documents for pagination
+  const totalUsers = await Model.countDocuments(query);
 
   res.status(200).json(
     new ApiResponse(
@@ -117,11 +111,6 @@ const getAllUsers = asyncHandler(async (req, res) => {
         limit: limitNum,
         totalPages: Math.ceil(totalUsers / limitNum),
         totalUsers,
-        totalTailors,
-        totalCustomers,
-        pendingTailors,
-        approvedTailors,
-        rejectedTailors,
       }
     )
   );

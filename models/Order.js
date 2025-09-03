@@ -1,5 +1,34 @@
 import mongoose from 'mongoose';
 
+const { Schema } = mongoose;
+
+const orderSchema = new Schema(
+  {
+    service: { type: Schema.Types.ObjectId, ref: "Service", required: true },
+    tailor: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    customer: { type: Schema.Types.ObjectId, ref: "Customer", required: true },
+    customerName: { type: String, required: true },
+    customerAddress: { type: String, required: true },
+    price: { type: Number, required: true },
+    deliveryOption: {
+      type: String,
+      enum: ["regular", "express", "preference"],
+      default: "regular",
+    },
+    status: {
+      type: String,
+      enum: ["Pending", "In Progress", "Completed", "Cancelled"],
+      default: "Pending",
+    },
+    additionalNotes: { type: String },
+    createdAt: { type: Date, default: Date.now },
+  },
+  { timestamps: true }
+);
+
+
+
+
 const qcCheckpointSchema = new mongoose.Schema({
   photoUrl: { type: String },
   metadata: {
@@ -45,42 +74,24 @@ const deliveryCoordinationSchema = new mongoose.Schema({
   updatedAt: Date,
 });
 
-const orderSchema = new mongoose.Schema(
+const readymadeOrderSchema = new mongoose.Schema(
   {
-    customerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    tailorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    intakeChannel: { type: String, enum: ['mobile_app', 'web', 'call_center'], default: 'mobile_app' },
-    classification: { type: String, enum: ['ready-made', 'alteration', 'custom'], required: true },
-    lifecycleStatus: lifecycleStatusSchema,
-    batchGroupId: { type: String },
-    resourcePlanning: [resourcePlanningSchema],
-    qcCheckpoints: [qcCheckpointSchema],
-    rushOrder: { type: Boolean, default: false },
-    rushPricingMultiplier: { type: Number, default: 1.0 },
-    partialDeliveries: [partialDeliverySchema],
-    deliveryCoordination: deliveryCoordinationSchema,
-    orderDetails: { type: Object },
-    measurements: { type: Object },
-    customizations: { type: Object },
-    deliveryAddress: { type: Object },
-    progressPhotos: [
-      {
-        url: String,
-        uploadedAt: Date,
-        mimetype: String,
-        size: Number,
-      },
-    ],
-    returnLogistics: {
-      initiated: Boolean,
-      reason: String,
-      photos: [String],
-      status: String,
-      initiatedAt: Date,
+    customer: {
+      id: { type: mongoose.Schema.Types.ObjectId, ref: "Customer", required: true },
+      name: { type: String, required: true },
+      address: { type: String, required: true },
     },
+    readymadeCloth: { type: mongoose.Schema.Types.ObjectId, ref: "ReadymadeCloth", required: true },
+    tailorId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+    finalPrice: { type: Number, required: true },
+    status: { type: String, enum: ["Pending", "Confirmed", "Completed", "Cancelled"], default: "Pending" },
   },
   { timestamps: true }
 );
 
-const Order = mongoose.model('Order', orderSchema);
-export default Order;
+export const ReadymadeOrder= mongoose.model("ReadymadeOrder", readymadeOrderSchema);
+
+
+
+export const Order = mongoose.model('Order', orderSchema);
+
